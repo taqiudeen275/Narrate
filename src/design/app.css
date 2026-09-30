@@ -439,44 +439,70 @@
 
 .n-w:hover { background: var(--wash-1); }
 
+/* Focus mode. One sentence, large, on the wash. No card, no border: the
+   current sentence is distinguished by a colour wash and the current word by a
+   second, stronger colour plus weight. */
 .n-reader-focus {
+  display: flex;
+  flex-direction: column;
+  min-block-size: 0;
+}
+
+.n-focus-stage {
+  flex: 1;
   display: grid;
   place-items: center;
-  padding: var(--s-6);
+  padding: var(--s-4) var(--s-6) var(--s-6);
+  overflow-y: auto;
+  min-block-size: 0;
 }
 
 .n-focus-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--s-3);
-  max-inline-size: 32rem;
+  gap: var(--s-4);
+  max-inline-size: 40rem;
   text-align: center;
+  inline-size: 100%;
 }
 
 .n-focus-sentence {
   margin: 0;
-  font-size: var(--t-lg);
-  line-height: 1.6;
-  color: var(--ink-4);
+  font-family: var(--font-read);
+  font-size: 1.5rem;
+  font-weight: 300;
+  line-height: 1.45;
+  letter-spacing: -0.02em;
+  color: var(--ink-3);
   cursor: pointer;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-lg);
   transition: all var(--t-mid) var(--ease);
-  padding: var(--s-1) var(--s-2);
 }
 
-.n-focus-sentence:hover { color: var(--ink-2); }
+.n-focus-sentence:hover { color: var(--ink-2); background: rgb(255 255 255 / 0.4); }
 
 .n-focus-now {
   color: var(--ink);
-  font-size: var(--t-2xl);
+  font-size: 2.125rem;
   font-weight: 300;
-  line-height: 1.4;
-  letter-spacing: -0.02em;
-  padding: var(--s-3) var(--s-4);
-  border-radius: var(--r-lg);
-  background: var(--glass-strong);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  box-shadow: var(--sh-md);
+  line-height: 1.3;
+  padding: var(--s-4) var(--s-4);
+  background: rgb(207 224 212 / 0.5);
+  box-shadow: none;
+}
+
+.n-focus-now:hover { background: rgb(207 224 212 / 0.6); }
+
+/* In focus mode the whole sentence is the reading surface, so it carries the
+   same word states the page does: a wash for the sentence, a stronger colour
+   and weight for the word actually being spoken. */
+.n-focus-stack .n-w { font-family: inherit; font-size: inherit; }
+.n-focus-stack .n-w-sentence { background: rgb(255 255 255 / 0.34); }
+.n-focus-stack .n-w-now {
+  color: var(--ink-on-green);
+  background: var(--accent);
+  font-weight: 600;
 }
 
 /* -------------------------------------------------------------- transport ---- */
@@ -523,6 +549,8 @@
   gap: var(--s-2);
   padding: 0.3rem 0.8rem 0.3rem 0.3rem;
   border-radius: var(--r-pill);
+  flex: 0 1 auto;
+  min-inline-size: 0;
   transition: all var(--t-fast) var(--ease);
 }
 
@@ -531,11 +559,49 @@
 .n-transport-voice-text {
   display: flex;
   flex-direction: column;
-  line-height: 1.15;
+  line-height: 1.2;
   text-align: start;
+  min-inline-size: 0;
+  max-inline-size: 9rem;
 }
 
-.n-transport-voice-name { font-size: var(--t-sm); font-weight: 500; }
+.n-transport-voice-name {
+  font-size: var(--t-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The model a narrator belongs to. Narrators are model-bound, so this is
+   information, not metadata: it says which engine will actually speak. */
+.n-transport-voice-model {
+  font-size: var(--t-3xs);
+  color: var(--ink-3);
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-dot-busy { color: var(--accent); font-weight: 500; }
+.live-dot-busy::before { animation: n-pulse 1.1s var(--ease) infinite; }
+
+/* Narrator cards carry a translucent wash of their own hue. */
+.n-vcard {
+  background:
+    linear-gradient(
+      150deg,
+      hsl(var(--av-h, 150) 40% 92% / 0.55) 0%,
+      hsl(var(--av-h, 150) 30% 86% / 0.3) 60%,
+      rgb(255 255 255 / 0.5) 100%
+    );
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.n-vcard-tags { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-block-start: var(--s-1); }
+.n-vcard-accent { font-size: var(--t-3xs); color: var(--ink-3); }
 
 /* ------------------------------------------------------------- waveforms ---- */
 
@@ -570,6 +636,34 @@
   background: var(--accent);
   opacity: 1;
   box-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* Rendering in flight. A travelling wave, staggered off each bar's index by
+   the component, so the motion reads left-to-right like work progressing.
+   With motion reduced the delay still orders the bars but nothing moves, and
+   the accent-coloured frontier still communicates progress. */
+.n-wave-busy .n-wave-bar {
+  animation: n-sweep 1.5s var(--ease) infinite;
+  transform-origin: center;
+}
+
+.n-wave-busy .n-wave-head,
+.n-wave-busy .n-wave-played {
+  background: var(--accent);
+  opacity: 0.9;
+  animation: none;
+}
+
+@keyframes n-sweep {
+  0%, 100% { transform: scaleY(0.34); opacity: 0.45; }
+  40% { transform: scaleY(1); opacity: 1; }
+}
+
+.n-scrub-busy { cursor: progress; opacity: 0.9; }
+
+@media (prefers-reduced-motion: reduce) {
+  .n-wave-busy .n-wave-bar { animation: none; transform: none; }
+  .n-scrub-head { transition: none; }
 }
 
 .n-scrub {

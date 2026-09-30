@@ -37,29 +37,57 @@ function RoundButton({
 /**
  * The transport.
  *
- * A floating glass pill: paragraph jumps outermost, sentence jumps inside them,
- * the filled green play disc in the middle over a scrub track, and the cast
- * narrator on the right. Word seeking is not here on purpose — it happens by
- * touching the word in the reader.
+ * No fill and no shadow of its own: it sits directly on the green wash, and
+ * separation comes from the circular controls. Sentence jumps are a bare
+ * chevron; paragraph jumps add a bar on the outside edge, following the
+ * skip-to-start convention.
+ *
+ * While rendering, the track becomes indeterminate and a travelling wave runs
+ * through it, so waiting is visibly different from stalled.
  */
-export function Transport() {
+export function Transport({ onPickVoice }: { onPickVoice?: () => void }) {
   const {
     doc, playing, time, duration, voiceId, targetSentence,
-    toggle, stepSentence, stepParagraph, seekWord, setView,
-    busy, engineLoading, renderedCount,
+    toggle, stepSentence, stepParagraph, seekWord,
+    busy, engineLoading, modelProgress, renderedCount, engine,
   } = useNarrate();
 
   const voice = voiceById(voiceId);
   const total = doc?.sentences.length ?? 0;
   const progress = duration > 0 ? Math.min(1, time / duration) : 0;
+  const working = busy || engineLoading;
+
+  const statusText = engineLoading
+    ? modelProgress?.fraction != null
+      ? `loading model ${Math.round(modelProgress.fraction * 100)}%`
+      : 'loading model'
+    : busy
+      ? `rendering ${renderedCount} of ${total}`
+      : playing
+        ? 'speaking'
+        : 'ready';
 
   return (
-    <div className="n-transport glass-strong" role="region" aria-label="Playback">
+    <div
+      className={`n-transport${working ? ' n-transport-busy' : ''}`}
+      role="region"
+      aria-label="Playback"
+    >
       <div className="n-transport-jumps">
-        <RoundButton name="prevParagraph" label="Previous paragraph" small
-          onClick={() => void stepParagraph(-1)} disabled={!total} />
-        <RoundButton name="prevSentence" label="Previous sentence" small
-          onClick={() => void stepSentence(-1)} disabled={!total} />
+        <RoundButton
+          name="prevParagraph"
+          label="Previous paragraph"
+          small
+          onClick={() => void stepParagraph(-1)}
+          disabled={!total || working}
+        />
+        <RoundButton
+          name="prevSentence"
+          label="Previous sentence"
+          small
+          onClick={() => void stepSentence(-1)}
+          disabled={!total || working}
+        />
       </div>
 
       <RoundButton
@@ -76,6 +104,7 @@ export function Transport() {
           progress={progress}
           seed={(doc?.charCount ?? 7) % 9973}
           label="Position in document"
+          busy={working}
           onSeek={(f) => {
             const s = doc?.sentences[Math.floor(f * Math.max(total - 1, 0))];
             if (s) void seekWord(s.wordStart);
@@ -84,31 +113,49 @@ export function Transport() {
         <div className="n-transport-meta">
           <span className="mono">{clock(time)}</span>
           <span className="n-transport-sep">/</span>
-          <span className="mono n-transport-total">{duration > 0 ? clock(duration) : '--:--'}</span>
+          <span className="mono n-transport-total">
+            {duration > 0 ? clock(duration) : '--:--'}
+          </span>
           <span className="n-transport-spacer" />
-          <span className={`live-dot${playing ? ' live-dot-on' : ''}`}>
-            {engineLoading ? 'loading model' : playing ? 'speaking' : engineLoading ? 'ready' : 'ready'}
+          <span
+            className={`live-dot${working ? ' live-dot-busy' : ''}${playing ? ' live-dot-on' : ''}`}
+            role="status"
+            aria-live="polite"
+          >
+            {statusText}
           </span>
         </div>
       </div>
 
       <div className="n-transport-jumps">
-        <RoundButton name="nextSentence" label="Next sentence" small
-          onClick={() => void stepSentence(1)} disabled={!total} />
-        <RoundButton name="nextParagraph" label="Next paragraph" small
-          onClick={() => void stepParagraph(1)} disabled={!total} />
+        <RoundButton
+          name="nextSentence"
+          label="Next sentence"
+          small
+          onClick={() => void stepSentence(1)}
+          disabled={!total || working}
+        />
+        <RoundButton
+          name="nextParagraph"
+          label="Next paragraph"
+          small
+          onClick={() => void stepParagraph(1)}
+          disabled={!total || working}
+        />
       </div>
 
       <button
         type="button"
         className="n-transport-voice"
-        onClick={() => setView('voices')}
-        aria-label={`Narrator: ${voice?.name ?? voiceId}. Change narrator`}
+        onClick={() => onPickVoice?.()}
+        aria-label={`Narrator: ${voice?.name ?? voiceId}, from ${engine.name}. Change narrator`}
+        title={`${voice?.name ?? voiceId} — ${engine.name}`}
       >
         {voice ? <VoiceAvatar voice={voice} size={38} active={playing} /> : null}
         <span className="n-transport-voice-text">
           <span className="label">Narrator</span>
           <span className="n-transport-voice-name">{voice?.name ?? '—'}</span>
+          <span className="n-transport-voice-model">{engine.name}</span>
         </span>
       </button>
 

@@ -1,0 +1,279 @@
+/* Library: the two ways in, the shelf of documents, and the on-open bar.
+ *
+ * Same material as everything else — light ground, frosted glass, large radii,
+ * soft shadows, and no border property anywhere. The drop target in particular
+ * looks like a drop target because of its scale, tint and lift, not because
+ * of a dashed rule: a dashed rectangle is the single fastest way to make this
+ * app look like a file utility instead of a listening surface. */
+
+.n-lib-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--s-4);
+  max-inline-size: 68rem;
+  margin: 0 auto var(--s-5);
+}
+
+@media (max-width: 900px) {
+  .n-lib-inputs { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* -------------------------------------------------------------- dropzone ---- */
+
+/* The target. Soft tint, very large radius, centred content, and a lift on
+   hover so it behaves like something you can press. */
+.n-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  padding: var(--s-7) var(--s-5);
+  text-align: center;
+  border-radius: var(--r-xl);
+  background: rgb(207 224 212 / 0.28);
+  box-shadow: var(--sh-inset);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition:
+    transform var(--t-mid) var(--ease),
+    background var(--t-mid) var(--ease),
+    box-shadow var(--t-mid) var(--ease);
+}
+
+.n-dropzone:hover {
+  background: rgb(207 224 212 / 0.45);
+  transform: translateY(-3px);
+  box-shadow: var(--sh-lg);
+}
+
+/* A file is over the target, not hovering it. Stronger tint, a visible lift,
+   and a scale that reads as the target opening to receive. */
+.n-dropzone-drag {
+  background: rgb(143 183 156 / 0.5);
+  transform: translateY(-4px) scale(1.012);
+  box-shadow: var(--sh-lg), 0 0 0 3px var(--accent-soft);
+}
+
+.n-dropzone-drag:hover { background: rgb(143 183 156 / 0.55); }
+
+.n-drop-title {
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.n-drop-sub {
+  font-size: var(--t-2xs);
+  line-height: 1.55;
+  color: var(--ink-3);
+  max-inline-size: 46ch;
+}
+
+/* ----------------------------------------------------------------- paste ---- */
+
+.n-paste {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border-radius: var(--r-xl);
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  box-shadow: var(--sh-md);
+}
+
+/* Borderless and resizable: the tint plus the inset shadow is the well, and
+   Literata at a generous line height makes a blank box feel like a page. */
+.n-textarea {
+  flex: 1;
+  inline-size: 100%;
+  min-block-size: 8rem;
+  padding: var(--s-3) var(--s-4);
+  border: none;
+  border-radius: var(--r-md);
+  background: rgb(241 241 239 / 0.7);
+  box-shadow: var(--sh-inset);
+  color: var(--ink);
+  font-family: var(--font-read);
+  font-size: var(--t-sm);
+  line-height: 1.75;
+  resize: vertical;
+  transition: box-shadow var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+
+.n-textarea::placeholder { color: var(--ink-4); font-family: var(--font-read); }
+
+.n-textarea:focus {
+  outline: none;
+  background: rgb(241 241 239 / 0.9);
+  box-shadow: var(--sh-inset), 0 0 0 2px var(--accent-soft);
+}
+
+.n-paste-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------------ grid ---- */
+
+.n-lib-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  padding: var(--s-8) var(--s-5);
+  text-align: center;
+  border-radius: var(--r-xl);
+  background: var(--glass-thin);
+  box-shadow: var(--sh-inset);
+  max-inline-size: 68rem;
+  margin: 0 auto;
+}
+
+.n-libgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: var(--s-3);
+  max-inline-size: 68rem;
+  margin: 0 auto var(--s-5);
+}
+
+/* A real button, so it is reachable by keyboard and reads as pressable:
+   full width, start-aligned, and lifted on hover. */
+.n-libcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  inline-size: 100%;
+  padding: var(--s-4);
+  text-align: start;
+  border-radius: var(--r-lg);
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  box-shadow: var(--sh-md);
+  transition: all var(--t-fast) var(--ease);
+}
+
+.n-libcard:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--sh-lg);
+}
+
+/* The open document: brighter glass and a ring of accent glow rather than an
+   outline, so the current card is still obviously a borderless card. */
+.n-libcard-on {
+  background: var(--glass-strong);
+  box-shadow: var(--sh-md), 0 0 0 2px var(--accent), 0 0 0 7px var(--accent-glow);
+}
+
+.n-libcard-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-inline-size: 0;
+  color: var(--ink-2);
+}
+
+.n-libcard-title {
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.n-libcard-meta {
+  font-size: var(--t-3xs);
+  color: var(--ink-3);
+}
+
+.n-libcard .n-wave { margin-block-start: var(--s-2); }
+
+/* ---------------------------------------------------------------- openbar ---- */
+
+/* The one decision that belongs to the reader, so it gets a full panel: what
+   the document is on the left, the two ways to play it on the right. */
+.n-openbar {
+  position: sticky;
+  inset-block-end: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-5);
+  flex-wrap: wrap;
+  max-inline-size: 68rem;
+  margin: var(--s-4) auto 0;
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--r-xl);
+  background: var(--glass-strong);
+  backdrop-filter: blur(calc(var(--glass-blur) * 1.4)) saturate(1.5);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.4)) saturate(1.5);
+  box-shadow: var(--sh-lg);
+}
+
+.n-openbar-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-inline-size: 0;
+  flex: 1 1 16rem;
+}
+
+.n-openbar-title {
+  font-size: var(--t-lg);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.n-openbar-meta {
+  font-size: var(--t-2xs);
+  color: var(--ink-3);
+}
+
+.n-openbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 900px) {
+  .n-libcard { padding: var(--s-3); }
+  .n-dropzone { padding: var(--s-6) var(--s-4); }
+  .n-openbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--s-3);
+    padding: var(--s-4);
+  }
+  .n-openbar-actions { justify-content: stretch; }
+  .n-openbar-actions .pill { flex: 1 1 12rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .n-dropzone,
+  .n-dropzone-drag,
+  .n-libcard,
+  .n-textarea {
+    transition: none;
+  }
+  .n-dropzone:hover,
+  .n-dropzone-drag,
+  .n-libcard:hover {
+    transform: none;
+  }
+}

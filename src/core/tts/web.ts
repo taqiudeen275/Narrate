@@ -18,7 +18,7 @@ import type {
   TtsEngine,
   VoiceInfo,
 } from './engine';
-import { KOKORO_VOICES, type Voice } from './voices';
+import { availableVoices, type Voice } from './voices';
 
 type KokoroInstance = {
   generate: (
@@ -31,8 +31,7 @@ const MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
 
 /**
  * q8 is the shipping choice. The model is unusually well-behaved under
- * quantization — 4-bit per-channel costs it almost nothing — so there is no
- * quality reason to ship the 310 MB fp32 build.
+ * quantization, so there is no quality reason to ship the 310 MB fp32 build.
  */
 const DTYPE = 'q8';
 
@@ -59,7 +58,13 @@ export class WebKokoroEngine implements TtsEngine {
   }
 
   private async doLoad(): Promise<void> {
-    const progress = (r: { status?: string; file?: string; progress?: number; loaded?: number; total?: number }) => {
+    const progress = (r: {
+      status?: string;
+      file?: string;
+      progress?: number;
+      loaded?: number;
+      total?: number;
+    }) => {
       if (r.status !== 'progress' || !r.file) return;
       this.onProgress?.({
         file: r.file,
@@ -76,8 +81,12 @@ export class WebKokoroEngine implements TtsEngine {
     this.tts = tts as unknown as KokoroInstance;
   }
 
+  /**
+   * Narrators belong to the model that carries them, so this is the honest
+   * source of truth: whatever this engine reports, not a hardcoded global list.
+   */
   voices(): VoiceInfo[] {
-    return KOKORO_VOICES.map((v: Voice) => ({
+    return availableVoices().map((v: Voice) => ({
       id: v.id,
       name: v.name,
       persona: v.persona,
@@ -94,8 +103,8 @@ export class WebKokoroEngine implements TtsEngine {
   ): Promise<EngineChunk> {
     await this.load(this.onProgress);
     if (!this.tts) throw new Error('Kokoro is not loaded');
-    if (!KOKORO_VOICES.some((v) => v.id === voiceId)) {
-      throw new Error(`Voice "${voiceId}" is not available in ${this.name}.`);
+    if (!availableVoices().some((v) => v.id === voiceId)) {
+      throw new Error(`"${voiceId}" is not a voice in ${this.name}.`);
     }
 
     const out = await this.tts.generate(text, {

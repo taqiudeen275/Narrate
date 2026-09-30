@@ -2,35 +2,42 @@ import { useMemo, useState } from 'react';
 import { useNarrate } from '../state/store';
 import { VoiceAvatar } from '../design/VoiceAvatar';
 import { Icon } from '../design/Icon';
-import { KOKORO_VOICES, voicesByAccent, type Voice } from '../core/tts/voices';
+import { availableVoices, type Voice } from '../core/tts/voices';
 
 /**
- * Casting.
+ * The full cast.
  *
- * Every voice is presented with a name, a character note, an accent, and a
- * generated avatar — because the user is choosing a narrator, not a format.
- * A "Play sample" control on each card is the only honest way to compare:
- * automatic quality scores systematically over-rate small models, so the app
- * never ranks or scores voices for you.
+ * Cards carry a translucent tonal wash derived from the voice's own hue, so the
+ * grid reads as a set of people rather than a list of rows. Every card names
+ * the model its narrator belongs to, because narrators are model-bound and a
+ * name without its model is a name that will silently stop working the day the
+ * engine changes.
  */
-export function VoicePicker() {
-  const { voiceId, setVoice, setView, engine, engineReady, ensureEngine, busy } = useNarrate();
-  const [accent, setAccent] = useState<string>('All');
+export function VoicePicker({ onPickVoice }: { onPickVoice?: () => void }) {
+  const {
+    voiceId, setVoice, engine, engineReady, ensureEngine, busy,
+  } = useNarrate();
+  const [accent, setAccent] = useState('All');
   const [query, setQuery] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
-  const groups = useMemo(() => voicesByAccent(), []);
-  const accents = useMemo(() => ['All', ...Array.from(groups.keys()).sort()], [groups]);
+  const voices = useMemo(() => availableVoices(), []);
+  const accents = useMemo(
+    () => ['All', ...Array.from(new Set(voices.map((v) => v.accent))).sort()],
+    [voices],
+  );
 
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return KOKORO_VOICES.filter(
-      (v: Voice) =>
+    return voices.filter(
+      (v) =>
         (accent === 'All' || v.accent === accent) &&
         (!q || v.name.toLowerCase().includes(q) || v.persona.toLowerCase().includes(q)),
     );
-  }, [accent, query]);
+  }, [voices, accent, query]);
 
-  const sample = async (v: Voice) => {
+  const audition = async (v: Voice) => {
+    setError(null);
     await ensureEngine();
     if (!engine.ready) return;
     try {
@@ -43,7 +50,7 @@ export function VoicePicker() {
       src.connect(ctx.destination);
       src.start();
     } catch (e) {
-      useNarrate.setState({ error: e instanceof Error ? e.message : String(e) });
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -52,13 +59,20 @@ export function VoicePicker() {
       <header className="n-panel-head">
         <div>
           <div className="label">Casting</div>
-          <h1 className="heading n-panel-title">Narrators</h1>
+          <h1 className="n-panel-title">Narrators</h1>
           <p className="n-panel-sub">
-            {KOKORO_VOICES.length} voices, all running locally. Listen before you commit —
-            no automatic score can tell you which narrator suits a book.
+            {voices.length} voices, all running locally in {engine.name}. A narrator is a
+            speaker inside one model's weights, so this list belongs to {engine.name} and
+            changes when the engine does. Listen before you commit — no automatic score
+            can tell you which narrator suits a book.
           </p>
         </div>
-        <button type="button" className="pill" onClick={() => setView('player')}>Done</button>
+        {onPickVoice ? (
+          <button type="button" className="pill" onClick={onPickVoice}>
+            <Icon name="voice" size={16} />
+            Quick pick
+          </button>
+        ) : null}
       </header>
 
       <div className="n-filters">
@@ -69,7 +83,7 @@ export function VoicePicker() {
             placeholder="Search by name or character"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search voices"
+            aria-label="Search narrators"
           />
         </div>
         <div className="n-chips" role="group" aria-label="Filter by accent">
@@ -87,36 +101,48 @@ export function VoicePicker() {
         </div>
       </div>
 
+      {error ? <p className="n-error" role="alert">{error}</p> : null}
+
       <div className="n-voicegrid">
         {list.map((v) => {
           const on = v.id === voiceId;
           return (
-            <article key={v.id} className={`n-vcard${on ? ' n-vcard-on' : ''}`}>
+            <article
+              key={v.id}
+              className={`n-vcard${on ? ' n-vcard-on' : ''}`}
+              style={{ '--av-h': String(v.tone) } as React.CSSProperties}
+            >
               <button
                 type="button"
                 className="n-vcard-main"
                 onClick={() => setVoice(v.id)}
                 aria-pressed={on}
               >
-                <VoiceAvatar voice={v} size={48} active={on} />
-                <div className="n-vcard-text">
-                  <div className="n-vcard-name">
+                <VoiceAvatar voice={v} size={46} active={on} />
+                <span className="n-vcard-text">
+                  <span className="n-vcard-name">
                     {v.name}
                     {on ? <span className="n-vcard-check" aria-label="Selected" /> : null}
-                  </div>
-                  <div className="n-vcard-persona">{v.persona}</div>
-                  <div className="n-vcard-accent label">{v.accent}</div>
-                </div>
+                  </span>
+                  <span className="n-vcard-persona">{v.persona}</span>
+                  <span className="n-vcard-tags">
+                    <span className="n-sheet-model">{engine.name}</span>
+                    <span className="n-vcard-accent">{v.accent}</span>
+                    {v.clonable ? (
+                      <span className="n-sheet-model n-sheet-model-clone">clonable</span>
+                    ) : null}
+                  </span>
+                </span>
               </button>
               <div className="n-vcard-foot">
                 <button
                   type="button"
                   className="pill pill-quiet"
                   disabled={busy}
-                  onClick={() => void sample(v)}
+                  onClick={() => void audition(v)}
                 >
-                  <Icon name="play" size={14} />
-                  {engineReady ? 'Play sample' : 'Load model to sample'}
+                  <Icon name="play" size={13} />
+                  {engineReady ? 'Audition' : 'Load model to audition'}
                 </button>
               </div>
             </article>

@@ -16,7 +16,7 @@ const BARS = 150;
  * deterministic noise function, so a document always looks the same and the
  * view never shimmers on re-render.
  */
-export function PlayerView() {
+export function PlayerView({ onPickVoice }: { onPickVoice?: () => void }) {
   const { doc, time, duration, playing, currentSentence, voiceId, setView, view } = useNarrate();
   const voice = voiceById(voiceId);
 
@@ -76,7 +76,7 @@ export function PlayerView() {
         <button
           type="button"
           className="n-player-voice"
-          onClick={() => setView('voices')}
+          onClick={() => onPickVoice?.()}
           aria-label="Change narrator"
         >
           {voice ? <VoiceAvatar voice={voice} size={44} active={playing} /> : null}

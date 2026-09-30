@@ -31,6 +31,24 @@ function tokeniseBlock(doc: Doc, block: Block, from: number, to: number): Token[
   return out;
 }
 
+/** Every word in one sentence, in order, as renderable tokens. */
+function tokensOfSentence(doc: Doc, sentenceIndex: number): Token[] {
+  const s = doc.sentences[sentenceIndex];
+  if (!s) return [];
+  const out: Token[] = [];
+  for (let i = s.wordStart; i < s.wordEnd; i++) {
+    const w = doc.words[i];
+    if (i > s.wordStart) {
+      // Preserve the original inter-word spacing so the sentence still reads
+      // as prose rather than as a run-together list.
+      const gap = doc.plain.slice(doc.words[i - 1].end, w.start);
+      if (gap) out.push({ t: 'text', v: gap });
+    }
+    out.push({ t: 'word', w });
+  }
+  return out;
+}
+
 export function ReaderView() {
   const {
     doc, time, playing, currentSentence, readerMode, setReaderMode,
@@ -149,26 +167,56 @@ export function ReaderView() {
   /* ------------------------------------------------------------- focus mode ---- */
 
   if (isFocus) {
+    const centre = currentSentence?.index ?? 0;
     const window_ = [-2, -1, 0, 1, 2]
-      .map((d) => (currentSentence?.index ?? 0) + d)
+      .map((d) => centre + d)
       .filter((i) => i >= 0 && i < doc.sentences.length);
     return (
       <div className="n-reader n-reader-focus">
-        <div className="n-focus-stack">
-          {window_.map((i) => {
-            const s = doc.sentences[i];
-            const isNow = i === currentSentence?.index;
-            return (
-              <p
-                key={i}
-                ref={(el) => { if (el) sentenceRefs.current.set(i, el); }}
-                className={`n-focus-sentence${isNow ? ' n-focus-now' : ''}`}
-                onClick={() => void seekWord(s.wordStart)}
-              >
-                {s.text}
-              </p>
-            );
-          })}
+        {/* The mode switch lives in both modes. Omitting it here is what made
+            focus mode a one-way door. */}
+        <div className="n-page-toolbar">
+          <div className="label">Focus</div>
+          <div className="n-segment" role="group" aria-label="Reading mode">
+            <button
+              type="button"
+              className="n-segbtn"
+              onClick={() => setReaderMode('page')}
+              aria-pressed={false}
+            >
+              Page
+            </button>
+            <button
+              type="button"
+              className="n-segbtn n-segbtn-on"
+              onClick={() => setReaderMode('focus')}
+              aria-pressed
+            >
+              Focus
+            </button>
+          </div>
+        </div>
+
+        <div className="n-focus-stage">
+          <div className="n-focus-stack">
+            {window_.map((i) => {
+              const s = doc.sentences[i];
+              const isNow = i === centre;
+              return (
+                <p
+                  key={i}
+                  ref={(el) => { if (el) sentenceRefs.current.set(i, el); }}
+                  className={`n-focus-sentence${isNow ? ' n-focus-now' : ''}`}
+                  onClick={() => void seekWord(s.wordStart)}
+                >
+                  {/* Rendered as words, not a string: the current word has to
+                      highlight here too, or focus mode silently loses the
+                      feature it exists to foreground. */}
+                  {renderTokens(tokensOfSentence(doc, i))}
+                </p>
+              );
+            })}
+          </div>
         </div>
       </div>
     );

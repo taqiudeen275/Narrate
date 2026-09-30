@@ -50,6 +50,7 @@ export function Waveform({
   seed = 1,
   height = 72,
   live = false,
+  busy = false,
   className,
 }: {
   bars?: number;
@@ -59,14 +60,16 @@ export function Waveform({
   height?: number;
   /** Swells a band around the playhead while audio is running. */
   live?: boolean;
+  /** Work is in flight: sweep a travelling wave to show the system is alive. */
+  busy?: boolean;
   className?: string;
 }) {
   const head = progress * (bars - 1);
 
   return (
     <div
-      className={`n-wave${className ? ` ${className}` : ''}`}
-      style={{ blockSize: height }}
+      className={`n-wave${busy ? ' n-wave-busy' : ''}${className ? ` ${className}` : ''}`}
+      style={{ blockSize: height, '--n-bars': String(bars) } as React.CSSProperties}
       aria-hidden="true"
     >
       {Array.from({ length: bars }, (_, i) => {
@@ -78,11 +81,17 @@ export function Waveform({
           a = Math.min(1, a * (1 + Math.exp(-(d * d) / (bars * 0.5)) * 0.55));
         }
         const state = i < head - 0.5 ? 'played' : Math.abs(i - head) < 0.5 ? 'head' : 'ahead';
+        // While rendering, the delay is staggered off the index so the sweep
+        // travels rather than pulsing in place.
+        const delay = busy ? `${((i / bars) * 1.1).toFixed(3)}s` : undefined;
         return (
           <span
             key={i}
             className={`n-wave-bar n-wave-${state}`}
-            style={{ blockSize: `${(a * 100).toFixed(1)}%` }}
+            style={{
+              blockSize: `${(a * 100).toFixed(1)}%`,
+              animationDelay: delay,
+            }}
           />
         );
       })}
@@ -97,36 +106,42 @@ export function ScrubTrack({
   seed = 3,
   onSeek,
   label,
+  busy = false,
 }: {
   bars: number;
   progress: number;
   seed?: number;
   onSeek?: (fraction: number) => void;
   label: string;
+  /** Rendering is in flight: the track is indeterminate, not seekable. */
+  busy?: boolean;
 }) {
   return (
     <div
-      className="n-scrub"
+      className={`n-scrub${busy ? ' n-scrub-busy' : ''}`}
       role="slider"
-      tabIndex={0}
+      tabIndex={busy ? -1 : 0}
       aria-label={label}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuenow={Math.round(progress * 100)}
+      aria-valuenow={busy ? undefined : Math.round(progress * 100)}
+      aria-busy={busy || undefined}
       onKeyDown={(e) => {
-        if (!onSeek) return;
+        if (!onSeek || busy) return;
         const step = e.shiftKey ? 0.1 : 0.02;
         if (e.key === 'ArrowRight') { e.preventDefault(); onSeek(Math.min(1, progress + step)); }
         if (e.key === 'ArrowLeft') { e.preventDefault(); onSeek(Math.max(0, progress - step)); }
       }}
       onClick={(e) => {
-        if (!onSeek) return;
+        if (!onSeek || busy) return;
         const r = e.currentTarget.getBoundingClientRect();
         onSeek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
       }}
     >
-      <Waveform bars={bars} progress={progress} seed={seed} height={30} />
-      <span className="n-scrub-head" style={{ insetInlineStart: `${progress * 100}%` }} />
+      <Waveform bars={bars} progress={progress} seed={seed} height={30} busy={busy} />
+      {!busy ? (
+        <span className="n-scrub-head" style={{ insetInlineStart: `${progress * 100}%` }} />
+      ) : null}
     </div>
   );
 }

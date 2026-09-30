@@ -1,20 +1,27 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNarrate, readHash } from './state/store';
 import { Transport } from './components/Transport';
+import { VoiceSheet } from './components/VoiceSheet';
 import { PlayerView } from './views/PlayerView';
 import { ReaderView } from './views/ReaderView';
 import { VoicePicker } from './views/VoicePicker';
 import { ModelsView } from './views/ModelsView';
 import { VoiceLab } from './views/VoiceLab';
+import { LibraryView } from './views/LibraryView';
+import { GenerationView } from './views/GenerationView';
 import { Icon, type IconName } from './design/Icon';
 import './styles/base.css';
 import './design/app.css';
+import './design/sheet.css';
+import './design/library.css';
 
-type View = 'player' | 'reader' | 'voices' | 'lab' | 'models';
+type View = 'player' | 'reader' | 'library' | 'work' | 'voices' | 'lab' | 'models';
 
 const NAV: { view: View; icon: IconName; label: string }[] = [
   { view: 'player', icon: 'play', label: 'Listen' },
   { view: 'reader', icon: 'page', label: 'Read' },
+  { view: 'library', icon: 'library', label: 'Library' },
+  { view: 'work', icon: 'download', label: 'Work' },
   { view: 'voices', icon: 'voice', label: 'Narrators' },
   { view: 'lab', icon: 'mic', label: 'Voice lab' },
   { view: 'models', icon: 'models', label: 'Models' },
@@ -52,6 +59,7 @@ export default function App() {
     generateMode, setGenerateMode,
   } = useNarrate();
   const started = useRef(false);
+  const [sheet, setSheet] = useState(false);
 
   useEffect(() => {
     if (started.current) return;
@@ -131,15 +139,21 @@ export default function App() {
         </header>
 
         <div className="n-stage">
-          {view === 'player' ? <PlayerView /> : null}
+          {view === 'player' ? <PlayerView onPickVoice={() => setSheet(true)} /> : null}
           {view === 'reader' ? <ReaderView /> : null}
-          {view === 'voices' ? <VoicePicker /> : null}
+          {view === 'library' ? <LibraryView /> : null}
+          {view === 'work' ? <GenerationView /> : null}
+          {view === 'voices' ? <VoicePicker onPickVoice={() => setSheet(true)} /> : null}
           {view === 'lab' ? <VoiceLab /> : null}
           {view === 'models' ? <ModelsView /> : null}
         </div>
 
-        {view === 'player' || view === 'reader' ? <Transport /> : null}
+        {view === 'player' || view === 'reader' ? (
+          <Transport onPickVoice={() => setSheet(true)} />
+        ) : null}
       </main>
+
+      {sheet ? <VoiceSheet onClose={() => setSheet(false)} /> : null}
 
       {/* The reference's floating bottom pill, for narrow screens. */}
       <NavItems view={view as View} setView={setView} className="n-bottomnav glass-strong" />

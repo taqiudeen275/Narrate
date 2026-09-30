@@ -19,7 +19,8 @@ import { WebKokoroEngine } from '../core/tts/web';
 import { DEFAULT_VOICE_ID, voiceById } from '../core/tts/voices';
 import { SAMPLE_DOC } from './sample';
 
-export type MainView = 'player' | 'reader' | 'models' | 'voices' | 'lab';
+export type MainView =
+  | 'player' | 'reader' | 'library' | 'work' | 'models' | 'voices' | 'lab';
 export type ReaderMode = 'page' | 'focus';
 export type GenerateMode = 'stream' | 'full';
 
@@ -459,7 +460,9 @@ export const useNarrate = create<State & Actions>((set, get) => {
 /** Read the initial view and reader mode from the URL hash. */
 export function readHash(): { view?: MainView; readerMode?: ReaderMode } {
   if (typeof location === 'undefined') return {};
-  const m = /^#\/(player|reader|models|voices|lab)(?:\/(page|focus))?$/.exec(location.hash);
+  const m = /^#\/(player|reader|library|work|models|voices|lab)(?:\/(page|focus))?$/.exec(
+    location.hash,
+  );
   if (!m) return {};
   return { view: m[1] as MainView, readerMode: m[2] as ReaderMode | undefined };
 }
