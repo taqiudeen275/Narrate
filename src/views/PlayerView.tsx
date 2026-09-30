@@ -1,11 +1,9 @@
 import { useMemo } from 'react';
 import { useNarrate } from '../state/store';
 import { VoiceAvatar } from '../design/VoiceAvatar';
-import { Waveform } from '../design/Waveform';
+import { LineWave } from '../design/Waveform';
 import { Icon } from '../design/Icon';
 import { voiceById } from '../core/tts/voices';
-
-const BARS = 150;
 
 /**
  * The music-player view.
@@ -88,7 +86,7 @@ export function PlayerView({ onPickVoice }: { onPickVoice?: () => void }) {
       </header>
 
       <div className="n-stage-well">
-        <Waveform bars={BARS} progress={progress} seed={seed} live={playing} height={168} />
+        <LineWave seed={seed} progress={progress} live={playing} height={168} />
       </div>
 
       <div className="n-caption">

@@ -17,9 +17,14 @@ import './design/library.css';
 
 type View = 'player' | 'reader' | 'library' | 'work' | 'voices' | 'lab' | 'models';
 
-const NAV: { view: View; icon: IconName; label: string }[] = [
-  { view: 'player', icon: 'play', label: 'Listen' },
-  { view: 'reader', icon: 'page', label: 'Read' },
+/**
+ * Listen and Read are not places, they are two ways of looking at the same
+ * document and the same audio. So they live in the top bar as a switch, not in
+ * the sidebar: choosing a document in the library and then choosing how to
+ * listen to it is one continuous action, and splitting it across two regions
+ * made it read as two unrelated screens.
+ */
+const SIDEBAR: { view: View; icon: IconName; label: string }[] = [
   { view: 'library', icon: 'library', label: 'Library' },
   { view: 'work', icon: 'download', label: 'Work' },
   { view: 'voices', icon: 'voice', label: 'Narrators' },
@@ -27,14 +32,15 @@ const NAV: { view: View; icon: IconName; label: string }[] = [
   { view: 'models', icon: 'models', label: 'Models' },
 ];
 
-function NavItems({ view, setView, className }: {
+function NavItems({ view, setView, items, className }: {
   view: View;
   setView: (v: View) => void;
+  items: { view: View; icon: IconName; label: string }[];
   className?: string;
 }) {
   return (
     <nav className={className} aria-label="Sections">
-      {NAV.map((n) => (
+      {items.map((n) => (
         <button
           key={n.view}
           type="button"
@@ -93,7 +99,7 @@ export default function App() {
           <span className="n-brand-name">Narrate</span>
         </div>
 
-        <NavItems view={view as View} setView={setView} className="n-nav" />
+        <NavItems view={view as View} setView={setView} items={SIDEBAR} className="n-nav" />
 
         <div className="n-rail-foot">
           <span className="n-local">Local only</span>
@@ -105,17 +111,47 @@ export default function App() {
           <div className="n-topbar-doc">
             {doc ? (
               <>
+                {/* The selection lives here, so Listen and Read always say
+                    which document from the library you are looking at. */}
                 <span className="n-topbar-title">{doc.title}</span>
                 <span className="n-topbar-meta mono">
                   {doc.words.length.toLocaleString()} words
+                  {doc.sourceName ? ` · ${doc.sourceName}` : ''}
                 </span>
               </>
             ) : (
-              <span className="n-topbar-title n-topbar-empty">No document</span>
+              <button
+                type="button"
+                className="n-topbar-title n-topbar-empty"
+                onClick={() => setView('library')}
+              >
+                No document — pick one from the library
+              </button>
             )}
           </div>
 
           <div className="n-topbar-right">
+            <div className="n-segment" role="group" aria-label="How to view the document">
+              <button
+                type="button"
+                className={`n-segbtn${view === 'player' ? ' n-segbtn-on' : ''}`}
+                onClick={() => setView('player')}
+                title="Listen without following the text"
+              >
+                <Icon name="play" size={13} />
+                Listen
+              </button>
+              <button
+                type="button"
+                className={`n-segbtn${view === 'reader' ? ' n-segbtn-on' : ''}`}
+                onClick={() => setView('reader')}
+                title="Follow the text word by word"
+              >
+                <Icon name="page" size={13} />
+                Read
+              </button>
+            </div>
+
             <div className="n-segment" role="group" aria-label="Generation mode">
               <button
                 type="button"
@@ -156,7 +192,12 @@ export default function App() {
       {sheet ? <VoiceSheet onClose={() => setSheet(false)} /> : null}
 
       {/* The reference's floating bottom pill, for narrow screens. */}
-      <NavItems view={view as View} setView={setView} className="n-bottomnav glass-strong" />
+      <NavItems
+        view={view as View}
+        setView={setView}
+        items={SIDEBAR}
+        className="n-bottomnav glass-strong"
+      />
 
       {error ? (
         <div className="n-toast" role="alert">

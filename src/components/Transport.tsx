@@ -100,9 +100,8 @@ export function Transport({ onPickVoice }: { onPickVoice?: () => void }) {
 
       <div className="n-transport-track">
         <ScrubTrack
-          bars={104}
-          progress={progress}
           seed={(doc?.charCount ?? 7) % 9973}
+          progress={progress}
           label="Position in document"
           busy={working}
           onSeek={(f) => {

@@ -74,8 +74,8 @@
 
 .n-navbtn-on {
   color: var(--ink);
-  background: var(--glass-strong);
-  box-shadow: var(--sh-sm);
+  background: rgb(255 255 255 / 0.62);
+  box-shadow: none;
 }
 
 .n-navbtn-on .n-navicon {
@@ -163,11 +163,15 @@
 }
 
 .n-segbtn {
-  padding: 0.4rem 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.85rem;
   border-radius: var(--r-pill);
   font-size: var(--t-2xs);
   font-weight: 500;
   color: var(--ink-3);
+  white-space: nowrap;
   transition: all var(--t-fast) var(--ease);
 }
 
@@ -264,13 +268,12 @@
 .n-stage-well {
   display: grid;
   place-items: center;
-  min-block-size: 9rem;
-  padding: var(--s-4) var(--s-7);
-  border-radius: var(--r-xl);
-  background: var(--glass-thin);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  box-shadow: var(--sh-inset);
+  min-block-size: 7rem;
+  padding: var(--s-4) var(--s-6);
+  /* No card: the trace sits directly on the wash. */
+  background: none;
+  backdrop-filter: none;
+  box-shadow: none;
 }
 
 .n-caption {
@@ -605,85 +608,34 @@
 
 /* ------------------------------------------------------------- waveforms ---- */
 
-/* Mirrored around a centre axis: each bar grows up and down, which is what
-   makes it read as a waveform rather than a barcode. */
-.n-wave {
-  display: flex;
-  align-items: center;
-  gap: clamp(1px, 0.32vw, 3px);
+/* The line trace. One SVG, a hard stop in a gradient for the played portion,
+   an open stroke so it never draws end walls, and a soft area fill beneath. */
+.n-line {
+  display: block;
   inline-size: 100%;
   min-inline-size: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
-.n-wave-bar {
-  flex: 1 1 0;
-  min-inline-size: 1px;
-  border-radius: var(--r-pill);
-  background: #2f3a34;
-  transition:
-    background var(--t-mid) var(--ease),
-    opacity var(--t-mid) var(--ease);
-}
+.n-line-busy { animation: n-breathe 1.6s var(--ease) infinite; transform-origin: center; }
 
-/* Ahead of the playhead: lighter and translucent, so the row has a soft
-   silhouette and the eye is drawn to the part that has been read. */
-.n-wave-ahead { background: #7f9389; opacity: 0.55; }
-
-.n-wave-played { background: #2f3a34; opacity: 0.85; }
-
-.n-wave-head {
-  background: var(--accent);
-  opacity: 1;
-  box-shadow: 0 0 8px var(--accent-glow);
-}
-
-/* Rendering in flight. A travelling wave, staggered off each bar's index by
-   the component, so the motion reads left-to-right like work progressing.
-   With motion reduced the delay still orders the bars but nothing moves, and
-   the accent-coloured frontier still communicates progress. */
-.n-wave-busy .n-wave-bar {
-  animation: n-sweep 1.5s var(--ease) infinite;
-  transform-origin: center;
-}
-
-.n-wave-busy .n-wave-head,
-.n-wave-busy .n-wave-played {
-  background: var(--accent);
-  opacity: 0.9;
-  animation: none;
-}
-
-@keyframes n-sweep {
-  0%, 100% { transform: scaleY(0.34); opacity: 0.45; }
-  40% { transform: scaleY(1); opacity: 1; }
-}
-
-.n-scrub-busy { cursor: progress; opacity: 0.9; }
-
-@media (prefers-reduced-motion: reduce) {
-  .n-wave-busy .n-wave-bar { animation: none; transform: none; }
-  .n-scrub-head { transition: none; }
+@keyframes n-breathe {
+  0%, 100% { opacity: 0.5; transform: scaleY(0.84); }
+  50% { opacity: 1; transform: scaleY(1); }
 }
 
 .n-scrub {
   position: relative;
   inline-size: 100%;
-  padding-block: 0.2rem;
+  padding-block: 0.15rem;
   cursor: pointer;
   border-radius: var(--r-sm);
 }
 
-.n-scrub-head {
-  position: absolute;
-  inset-block: 0;
-  inline-size: 2px;
-  margin-inline-start: -1px;
-  border-radius: 2px;
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
-  pointer-events: none;
-  transition: inset-inline-start 90ms linear;
+.n-scrub-busy { cursor: progress; }
+
+@media (prefers-reduced-motion: reduce) {
+  .n-line-busy { animation: none; transform: none; }
 }
 
 /* ---------------------------------------------------------------- avatars ---- */

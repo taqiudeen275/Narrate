@@ -1,17 +1,19 @@
 /**
- * Waveform.
+ * Waveform — a line.
  *
- * The reference's signature mark, and the thing that was reading worst when it
- * was a row of equal-weight bars. Three things fix it:
+ * Bars read as decoration; a line reads as a signal, which is what this is.
+ * Two mirrored traces of the same envelope, joined across the middle, so the
+ * shape reads the way a waveform drawn on graph paper does.
  *
- * 1. **Mirrored around a centre axis.** Real waveforms are symmetric; a row of
- *    bars hanging from the top reads as a barcode, not as sound.
- * 2. **A smooth multi-octave envelope**, not per-bar noise. Per-bar randomness
- *    has no shape, so the eye finds no rhythm. Layering a few sines of different
- *    frequency gives the swells and dips that read as a voice.
- * 3. **Fewer, rounder, tapered bars**, with the amplitude fading toward the
- *    edges so the row has a soft silhouette instead of a hard rectangle.
+ * Drawn as one SVG with a stretched viewBox rather than DOM bars, so the
+ * rendered output is a handful of elements instead of a hundred, and the line
+ * stays crisp at any width without measuring anything.
+ *
+ * The played portion is coloured with a hard stop in a linear gradient: one
+ * path, two colours, no clip path and no duplicate geometry.
  */
+
+import { useId } from 'react';
 
 function noise(i: number, seed: number): number {
   const x = Math.sin(i * 12.9898 + seed * 78.233) * 43758.5453;
@@ -19,101 +21,150 @@ function noise(i: number, seed: number): number {
 }
 
 /**
- * Amplitude at bar `i` of `n`. Deterministic for a given seed so a document
- * always produces the same silhouette.
+ * Envelope at `t` (0..1 across the width). Three sines at incommensurate
+ * frequencies give the swells and dips of a voice; a little grain keeps it from
+ * looking mechanically smooth.
+ *
+ * The ends are floored, not tapered. Tapering to zero closes the mirrored trace
+ * into a lozenge that reads as a blob rather than a signal — the amplitude has
+ * to stay alive right up to the edge for it to look like a chart.
  */
-function amplitude(i: number, n: number, seed: number): number {
-  const t = n > 1 ? i / (n - 1) : 0; // 0..1 across the row
+function envelope(t: number, seed: number): number {
   const x = t * Math.PI * 2;
-
-  // Three sines at incommensurate frequencies: the slow swell, the phrase
-  // rhythm, and the fast syllable flutter.
   const slow = Math.sin(x * 0.9 + seed * 0.7) * 0.5 + 0.5;
   const mid = Math.sin(x * 2.7 + seed * 1.9) * 0.5 + 0.5;
   const fast = Math.sin(x * 6.1 + seed * 3.3) * 0.5 + 0.5;
-  // A little grain so it is not mechanically smooth.
-  const grain = noise(i, seed) * 0.22;
-
-  let a = slow * 0.44 + mid * 0.3 + fast * 0.18 + grain;
-
-  // Taper both ends: a waveform does not start and stop at full height, and
-  // this is what stops the row reading as a filled rectangle.
-  const edge = Math.min(1, Math.min(t, 1 - t) * 6.5);
-  a *= 0.35 + edge * 0.65;
-
-  return Math.max(0.08, Math.min(1, a));
+  const grain = noise(Math.round(t * 400), seed) * 0.2;
+  // An overall swell across the whole row, so the shape has a direction.
+  const arc = 0.55 + 0.45 * Math.sin(t * Math.PI);
+  const a = (slow * 0.42 + mid * 0.32 + fast * 0.18 + grain) * arc;
+  return Math.max(0.22, Math.min(1, a));
 }
 
-export function Waveform({
-  bars = 72,
-  progress = 0,
+const SAMPLES = 220;
+const VB_W = 1000;
+const VB_H = 100;
+
+export function LineWave({
   seed = 1,
   height = 72,
+  progress = 0,
   live = false,
   busy = false,
   className,
+  label,
 }: {
-  bars?: number;
-  /** 0–1 through the track. */
-  progress?: number;
   seed?: number;
   height?: number;
-  /** Swells a band around the playhead while audio is running. */
+  /** 0–1 through the track. */
+  progress?: number;
+  /** Slightly fuller trace while audio is running. */
   live?: boolean;
-  /** Work is in flight: sweep a travelling wave to show the system is alive. */
+  /** Work in flight: the trace breathes to show the system is alive. */
   busy?: boolean;
   className?: string;
+  /** Accessible name; omit for a decorative trace. */
+  label?: string;
 }) {
-  const head = progress * (bars - 1);
+  const id = useId();
+  const p = Math.max(0, Math.min(1, progress));
+
+  // Two representations of the same envelope, because they want different
+  // closure. The area fill is a closed shape; the stroke is two OPEN subpaths,
+  // so the trace never draws a vertical wall down each end and reads as a
+  // chart rather than a lozenge.
+  const topEdge: string[] = [];
+  const bottomEdge: string[] = [];
+  for (let i = 0; i <= SAMPLES; i++) {
+    const t = i / SAMPLES;
+    let a = envelope(t, seed);
+    if (live) a = Math.min(1, a * 1.08);
+    const half = a * (VB_H / 2 - 3);
+    const x = t * VB_W;
+    topEdge.push(`${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${(VB_H / 2 - half).toFixed(2)}`);
+    bottomEdge.push(`${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${(VB_H / 2 + half).toFixed(2)}`);
+  }
+  const fillPath =
+    `${topEdge.join(' ')} ${bottomEdge
+      .slice()
+      .reverse()
+      .map((d) => d.replace('M', 'L'))
+      .join(' ')} Z`;
+  const strokePath = `${topEdge.join(' ')} ${bottomEdge.join(' ')}`;
 
   return (
-    <div
-      className={`n-wave${busy ? ' n-wave-busy' : ''}${className ? ` ${className}` : ''}`}
-      style={{ blockSize: height, '--n-bars': String(bars) } as React.CSSProperties}
-      aria-hidden="true"
+    <svg
+      className={[
+        'n-line',
+        busy ? 'n-line-busy' : '',
+        live ? 'n-line-live' : '',
+        className ?? '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      viewBox={`0 0 ${VB_W} ${VB_H}`}
+      preserveAspectRatio="none"
+      style={{ blockSize: height }}
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+      focusable="false"
     >
-      {Array.from({ length: bars }, (_, i) => {
-        let a = amplitude(i, bars, seed);
-        if (live) {
-          // A local swell around the playhead, so the field reacts to position
-          // without the whole row moving.
-          const d = i - head;
-          a = Math.min(1, a * (1 + Math.exp(-(d * d) / (bars * 0.5)) * 0.55));
-        }
-        const state = i < head - 0.5 ? 'played' : Math.abs(i - head) < 0.5 ? 'head' : 'ahead';
-        // While rendering, the delay is staggered off the index so the sweep
-        // travels rather than pulsing in place.
-        const delay = busy ? `${((i / bars) * 1.1).toFixed(3)}s` : undefined;
-        return (
-          <span
-            key={i}
-            className={`n-wave-bar n-wave-${state}`}
-            style={{
-              blockSize: `${(a * 100).toFixed(1)}%`,
-              animationDelay: delay,
-            }}
-          />
-        );
-      })}
-    </div>
+      <defs>
+        {/* A hard stop, not a fade: the line is one colour behind the playhead
+            and another colour ahead of it. */}
+        <linearGradient id={`${id}-g`} x1="0" x2="1" y1="0" y2="0">
+          <stop offset={`${p * 100}%`} stopColor="var(--accent)" />
+          <stop offset={`${p * 100}%`} stopColor="var(--wave-ahead)" />
+          <stop offset="100%" stopColor="var(--wave-ahead)" />
+        </linearGradient>
+        <linearGradient id={`${id}-f`} x1="0" x2="1" y1="0" y2="0">
+          <stop offset={`${p * 100}%`} stopColor="var(--accent)" stopOpacity="0.16" />
+          <stop offset={`${p * 100}%`} stopColor="var(--wave-ahead)" stopOpacity="0.05" />
+          <stop offset="100%" stopColor="var(--wave-ahead)" stopOpacity="0.05" />
+        </linearGradient>
+      </defs>
+
+      <path d={fillPath} fill={`url(#${id}-f)`} stroke="none" />
+      <path
+        d={strokePath}
+        fill="none"
+        stroke={`url(#${id}-g)`}
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+
+      {p > 0 && !busy ? (
+        <line
+          x1={p * VB_W}
+          x2={p * VB_W}
+          y1="4"
+          y2={VB_H - 4}
+          stroke="var(--accent)"
+          strokeWidth="1.5"
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
+    </svg>
   );
 }
 
-/** The compact track inside the transport, with a playhead rule. */
+/** The line trace as an interactive track. */
 export function ScrubTrack({
-  bars,
-  progress,
   seed = 3,
+  progress = 0,
+  height = 34,
   onSeek,
   label,
   busy = false,
 }: {
-  bars: number;
-  progress: number;
   seed?: number;
+  progress: number;
+  height?: number;
   onSeek?: (fraction: number) => void;
   label: string;
-  /** Rendering is in flight: the track is indeterminate, not seekable. */
   busy?: boolean;
 }) {
   return (
@@ -138,10 +189,7 @@ export function ScrubTrack({
         onSeek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
       }}
     >
-      <Waveform bars={bars} progress={progress} seed={seed} height={30} busy={busy} />
-      {!busy ? (
-        <span className="n-scrub-head" style={{ insetInlineStart: `${progress * 100}%` }} />
-      ) : null}
+      <LineWave seed={seed} progress={progress} height={height} busy={busy} />
     </div>
   );
 }

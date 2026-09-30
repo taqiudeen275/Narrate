@@ -52,6 +52,11 @@
   /* The live signal colour. Small, sparing, never large areas. */
   --live: #e2703a;
 
+  /* The line trace: what is ahead of the playhead, and the accent it becomes
+     once read. Two roles, one variable each. */
+  --wave-ahead: #7d968a;
+  --wave-played: var(--accent);
+
   /* ----------------------------------------------------------------- type ---- */
   --font-ui: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-read: 'Literata Variable', 'Literata', Georgia, serif;

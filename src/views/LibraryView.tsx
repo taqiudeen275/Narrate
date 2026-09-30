@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useNarrate, type GenerateMode } from '../state/store';
 import { Icon } from '../design/Icon';
-import { Waveform } from '../design/Waveform';
+import { LineWave } from '../design/Waveform';
 
 const ACCEPT = '.md,.markdown,.txt,.pdf,.docx,.epub,.rtf,.html,.htm,.xhtml';
 
@@ -136,7 +136,7 @@ export function LibraryView() {
               <span className="n-libcard-meta mono">
                 {e.wordCount.toLocaleString()} words · ~{e.minutes} min · {e.sourceName}
               </span>
-              <Waveform bars={40} progress={0} seed={e.addedAt % 9973} height={22} />
+              <LineWave progress={0} seed={e.addedAt % 9973} height={22} />
             </button>
           ))}
         </div>
