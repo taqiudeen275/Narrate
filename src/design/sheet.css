@@ -90,6 +90,17 @@
   margin-block-end: var(--s-3);
 }
 
+/* The wrapper carries the sheet's side padding, so the search glyph has to be
+   offset by that same padding to land inside the input rather than in the
+   gutter in front of it. */
+.n-sheet-search > svg {
+  inset-inline-start: calc(var(--s-5) + 1.1rem);
+}
+
+.n-sheet-search .input {
+  padding-inline-start: 2.9rem;
+}
+
 /* An audition failure lands between the search and the list. */
 .n-sheet-search + .n-error {
   margin: 0 var(--s-5) var(--s-3);
@@ -143,12 +154,14 @@
   opacity: 0;
 }
 
-/* The committed selection: a tinted ground and a ring in the deep green, the
-   same language as a selected voice card. Deliberately after the `::after`
-   rules so the ring is not competing with a hairline. */
+/* The committed selection.
+   A tinted ground and a soft accent halo, NOT an outline. A hard ring is a
+   drawn edge, and the whole point of this surface is that nothing here has
+   one: selection reads as a change in the material, not a border drawn
+   around it. */
 .n-sheet-row-on {
   background: var(--accent-soft);
-  box-shadow: var(--sh-sm), 0 0 0 1.5px var(--accent);
+  box-shadow: var(--sh-sm), 0 0 0 4px rgb(45 100 76 / 0.09);
 }
 
 .n-sheet-row-on .n-sheet-name {
@@ -184,7 +197,9 @@
   flex: 0 0 auto;
   margin-inline-start: auto;
   white-space: nowrap;
-}
+  color: var(--ink-3);
+  font-size: var(--t-3xs);
+  opacity: 0.85;}
 
 .n-sheet-text {
   flex: 1;

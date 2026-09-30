@@ -171,7 +171,7 @@
    outline, so the current card is still obviously a borderless card. */
 .n-libcard-on {
   background: var(--glass-strong);
-  box-shadow: var(--sh-md), 0 0 0 2px var(--accent), 0 0 0 7px var(--accent-glow);
+  box-shadow: var(--sh-md), 0 0 0 4px rgb(45 100 76 / 0.1), 0 0 0 7px var(--accent-glow);
 }
 
 .n-libcard-top {

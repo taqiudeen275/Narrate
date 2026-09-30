@@ -14,6 +14,23 @@ val tauriProperties = Properties().apply {
     }
 }
 
+/**
+ * Release signing.
+ *
+ * Credentials come from `keystore.properties` (or environment variables) so the
+ * keystore password is never committed. Without this block gradle emits an
+ * UNSIGNED release APK, which Android will refuse to install — so this is not
+ * optional for a phone build.
+ */
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { load(it) }
+    }
+}
+val hasReleaseKeystore = keystorePropsFile.exists() &&
+    rootProject.file(keystoreProps.getProperty("storeFile")).exists()
+
 android {
     compileSdk = 37
     namespace = "com.atarq.narrate"
@@ -24,6 +41,16 @@ android {
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -39,6 +66,9 @@ android {
             }
         }
         getByName("release") {
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                enable = true
             }

@@ -761,7 +761,11 @@
 .n-vcard:hover,
 .n-mcard:hover { transform: translateY(-3px); box-shadow: var(--sh-lg); }
 
-.n-vcard-on { box-shadow: var(--sh-md), 0 0 0 2px var(--accent); }
+/* Selection is a change in the material, not an outline drawn around it. A
+   hard ring is a border, and this surface has none. */
+.n-vcard-on {
+  box-shadow: var(--sh-md), 0 0 0 4px rgb(45 100 76 / 0.1);
+}
 
 .n-vcard-main {
   display: flex;
@@ -972,7 +976,7 @@
 }
 
 .n-labout:hover { transform: translateY(-2px); box-shadow: var(--sh-md); }
-.n-labout-on { box-shadow: var(--sh-md), 0 0 0 2px var(--accent); }
+.n-labout-on { box-shadow: var(--sh-md), 0 0 0 4px rgb(45 100 76 / 0.1); }
 .n-labout-name { font-size: var(--t-2xs); color: var(--ink); }
 
 .n-labout-play {
