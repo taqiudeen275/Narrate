@@ -1,0 +1,333 @@
+/* Base layer. The reference's material: air-frosted glass on a light ground,
+   soft green wash, no borders anywhere. */
+
+@import '@fontsource/archivo/300.css';
+@import '@fontsource/archivo/400.css';
+@import '@fontsource/archivo/500.css';
+@import '@fontsource/archivo/600.css';
+@import '@fontsource-variable/literata';
+@import '@fontsource/azeret-mono/400.css';
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  block-size: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--t-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+#root {
+  position: relative;
+  isolation: isolate;
+}
+
+/* The green wash. One fixed layer behind everything: a soft diagonal light
+   falling into deep green, with the heaviest tone at the bottom edge. */
+#root::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 70% at 15% 108%, var(--wash-3) 0%, transparent 58%),
+    radial-gradient(100% 60% at 85% 112%, var(--wash-4) 0%, transparent 62%),
+    linear-gradient(180deg, transparent 34%, var(--wash-1) 66%, var(--wash-2) 100%);
+  opacity: 0.9;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--r-sm);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------- materials ---- */
+
+/* The card. Frosted, borderless, generously rounded. */
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-md);
+}
+
+.glass-strong {
+  background: var(--glass-strong);
+  backdrop-filter: blur(calc(var(--glass-blur) * 1.4)) saturate(1.5);
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.4)) saturate(1.5);
+  box-shadow: var(--sh-lg);
+}
+
+/* A well: a soft depression the primary control sits in. */
+.well {
+  background: var(--glass-thin);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius: var(--r-pill);
+  box-shadow: var(--sh-inset);
+}
+
+/* ----------------------------------------------------------------- type ---- */
+
+.label {
+  font-size: var(--t-3xs);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.mono {
+  font-family: 'Azeret Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.heading {
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+  margin: 0;
+}
+
+/* -------------------------------------------------------------- controls ---- */
+
+/* The circular icon button from the reference: a white disc with a soft
+   shadow and a line glyph. Used for everything secondary. */
+.icon-btn {
+  display: grid;
+  place-items: center;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  border-radius: 50%;
+  color: var(--ink-2);
+  background: rgb(255 255 255 / 0.55);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow: 0 1px 3px rgb(29 59 45 / 0.07);
+  transition:
+    transform var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    background var(--t-fast) var(--ease);
+}
+
+.icon-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  background: rgb(255 255 255 / 0.8);
+  box-shadow: 0 4px 14px rgb(29 59 45 / 0.12);
+  color: var(--ink);
+}
+
+.icon-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: var(--sh-sm);
+}
+
+.icon-btn:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+
+.icon-btn-sm {
+  inline-size: 2.125rem;
+  block-size: 2.125rem;
+}
+
+/* The filled dark-green disc: the single primary action on a surface. */
+.icon-btn-primary {
+  inline-size: 3.5rem;
+  block-size: 3.5rem;
+  color: var(--ink-on-green);
+  background: var(--accent);
+  box-shadow: 0 2px 6px rgb(29 59 45 / 0.22), 0 10px 28px rgb(29 59 45 / 0.26),
+    0 0 0 8px var(--accent-glow);
+}
+
+.icon-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 3px 8px rgb(29 59 45 / 0.26), 0 14px 34px rgb(29 59 45 / 0.3),
+    0 0 0 10px var(--accent-glow);
+}
+
+/* Pills. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  padding: 0.6rem 1.15rem;
+  border-radius: var(--r-pill);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--sh-sm);
+  transition: all var(--t-fast) var(--ease);
+}
+
+.pill:hover:not(:disabled) {
+  color: var(--ink);
+  transform: translateY(-1px);
+  box-shadow: var(--sh-md);
+}
+
+.pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pill-primary {
+  color: var(--ink-on-green);
+  background: var(--accent);
+  box-shadow: 0 2px 5px rgb(29 59 45 / 0.2), 0 8px 20px rgb(29 59 45 / 0.22);
+}
+
+.pill-primary:hover:not(:disabled) {
+  color: var(--ink-on-green);
+  box-shadow: 0 3px 7px rgb(29 59 45 / 0.24), 0 12px 28px rgb(29 59 45 / 0.26);
+}
+
+.pill-dark {
+  color: #fff;
+  background: #141615;
+  box-shadow: 0 2px 5px rgb(0 0 0 / 0.18), 0 8px 20px rgb(0 0 0 / 0.16);
+}
+
+.pill-quiet {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink-2);
+}
+
+.pill-quiet:hover:not(:disabled) {
+  background: var(--glass);
+  box-shadow: none;
+  transform: none;
+}
+
+.input {
+  inline-size: 100%;
+  padding: 0.8rem 1.1rem;
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  box-shadow: var(--sh-inset);
+  font-size: var(--t-sm);
+}
+
+.input::placeholder {
+  color: var(--ink-4);
+}
+
+.input:focus {
+  outline: none;
+  box-shadow: var(--sh-inset), 0 0 0 2px var(--accent-soft);
+}
+
+/* ------------------------------------------------------------- indicators ---- */
+
+/* The small live dot with a label, straight from the reference. */
+.live-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--t-2xs);
+  color: var(--ink-2);
+}
+
+.live-dot::before {
+  content: '';
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: 50%;
+  background: var(--live);
+  box-shadow: 0 0 0 3px rgb(226 112 58 / 0.16);
+}
+
+.live-dot-on::before {
+  animation: n-pulse 1.6s var(--ease) infinite;
+}
+
+@keyframes n-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgb(226 112 58 / 0.16); }
+  50% { box-shadow: 0 0 0 6px rgb(226 112 58 / 0.05); }
+}
+
+/* ------------------------------------------------------------ scrollbar ---- */
+
+.scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-4) transparent;
+}
+
+.scroll::-webkit-scrollbar {
+  inline-size: 8px;
+}
+
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--ink-4);
+  border-radius: var(--r-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ------------------------------------------------------------ utilities ---- */
+
+.sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

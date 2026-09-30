@@ -1,0 +1,107 @@
+/*
+ * Narrate — the visual system.
+ *
+ * Pinned to the supplied reference, not derived from it. A calm, light,
+ * air-frosted surface with a soft green wash rising from the bottom, one deep
+ * forest green for commitment, and no borders anywhere. Depth comes from blur
+ * and shadow, never from a 1px rule — a border is the fastest way to make this
+ * look technical instead of calm.
+ */
+
+/* ----------------------------------------------------------------- ground ---- */
+
+:root {
+  /* The paper the whole app sits on. Warm off-white, not pure white. */
+  --ground: #f1f1ef;
+  --ground-2: #e9ebe8;
+  --ground-3: #dfe3df;
+
+  /* The green wash. Three stops, bottom-anchored, soft-edged. This is the
+     signature of the reference and it is the only place a gradient lives. */
+  --wash-1: #cfe0d4; /* top of the wash, barely there */
+  --wash-2: #8fb79c;
+  --wash-3: #6d9a83;
+  --wash-4: #2c5442; /* the deep anchor */
+  --wash-5: #1d3b2d; /* deepest — the committed green */
+
+  /* Ink. */
+  --ink: #1b1d1c;
+  --ink-2: #5f6562;
+  --ink-3: #8d9490;
+  --ink-4: #b3bab6;
+  --ink-on-green: #f2f6f2;
+
+  /* Glass. The card material. Borderless by rule. */
+  --glass: rgb(255 255 255 / 0.62);
+  --glass-strong: rgb(255 255 255 / 0.82);
+  --glass-thin: rgb(255 255 255 / 0.42);
+  --glass-blur: 22px;
+
+  /* Shadows. Soft, wide, low-contrast. Never a hard edge. */
+  --sh-sm: 0 1px 2px rgb(29 59 45 / 0.05), 0 2px 8px rgb(29 59 45 / 0.04);
+  --sh-md: 0 2px 6px rgb(29 59 45 / 0.06), 0 8px 24px rgb(29 59 45 / 0.07);
+  --sh-lg: 0 4px 12px rgb(29 59 45 / 0.08), 0 20px 48px rgb(29 59 45 / 0.10);
+  --sh-inset: inset 0 1px 2px rgb(29 59 45 / 0.07);
+
+  /* The one committed accent: the deep green. Used for the primary control,
+     the active nav item, and the current position in a waveform. */
+  --accent: var(--wash-5);
+  --accent-soft: rgb(29 59 45 / 0.10);
+  --accent-glow: rgb(45 100 76 / 0.22);
+
+  /* The live signal colour. Small, sparing, never large areas. */
+  --live: #e2703a;
+
+  /* ----------------------------------------------------------------- type ---- */
+  --font-ui: 'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-read: 'Literata Variable', 'Literata', Georgia, serif;
+
+  --t-3xs: 0.6875rem;
+  --t-2xs: 0.75rem;
+  --t-xs: 0.8125rem;
+  --t-sm: 0.875rem;
+  --t-base: 0.9375rem;
+  --t-md: 1rem;
+  --t-lg: 1.125rem;
+  --t-xl: 1.375rem;
+  --t-2xl: 1.75rem;
+  --t-3xl: 2.25rem;
+  --t-4xl: 2.875rem;
+  --t-5xl: 3.75rem;
+
+  /* -------------------------------------------------------------- spacing ---- */
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-7: 3rem;
+  --s-8: 4.5rem;
+
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 30px;
+  --r-pill: 999px;
+
+  /* --------------------------------------------------------------- motion ---- */
+  --ease: cubic-bezier(0.22, 0.9, 0.28, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 140ms;
+  --t-mid: 260ms;
+  --t-slow: 460ms;
+
+  --measure: 34rem;
+}
+
+/* The wash is anchored to the bottom of the viewport and stops rising well
+   before the top, so the majority of the surface stays light and the gradient
+   reads as light falling into foliage rather than as a green page. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 1ms;
+    --t-mid: 1ms;
+    --t-slow: 1ms;
+  }
+}
