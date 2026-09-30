@@ -12,13 +12,15 @@
   "app": {
     "windows": [
       {
-        "title": "narrate",
-        "width": 800,
-        "height": 600
+        "title": "Narrate",
+        "width": 1180,
+        "height": 820,
+        "minWidth": 720,
+        "minHeight": 560
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost https://huggingface.co https://*.huggingface.co https://cdn-lfs.hf.co https://*.hf.co; media-src 'self' blob: data:"
     }
   },
   "bundle": {

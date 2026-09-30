@@ -8,7 +8,15 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "verify": "tsx scripts/verify-parse.ts"
+    "verify": "tsx scripts/verify-parse.ts",
+    "app:dev": "tauri dev",
+    "app:build": "tauri build",
+    "app:android:init": "tauri android init",
+    "app:android:dev": "tauri android dev",
+    "app:android:build": "tauri android build",
+    "build:web": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run verify && npm run build:web"
   },
   "dependencies": {
     "@fontsource-variable/literata": "^5.3.0",
@@ -35,5 +43,6 @@
     "tsx": "^4.23.15",
     "typescript": "~6.0.3",
     "vite": "^8.0.16"
-  }
+  },
+  "productName": "Narrate"
 }
