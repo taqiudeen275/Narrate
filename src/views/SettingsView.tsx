@@ -3,6 +3,7 @@ import { Icon } from '../design/Icon';
 import { ModelsView } from './ModelsView';
 import { GenerationView } from './GenerationView';
 import { PageTransition } from '../components/PageTransition';
+import { APP_VERSION } from '../version';
 
 export function SettingsView({ initialTab = 'models' }: { initialTab?: 'models' | 'work' }) {
   const [tab, setTab] = useState(initialTab);
@@ -16,6 +17,7 @@ export function SettingsView({ initialTab = 'models' }: { initialTab?: 'models' 
         </div>
       </header>
       <div id="settings-content" className="n-settings-content" role="tabpanel" aria-labelledby={`settings-${tab}`}><PageTransition viewKey={tab} position={tab === 'models' ? 0 : 1}>{tab === 'models' ? <ModelsView /> : <GenerationView />}</PageTransition></div>
+      <p className="n-settings-build">Narrate {APP_VERSION}</p>
     </div>
   );
 }

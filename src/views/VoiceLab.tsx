@@ -126,7 +126,10 @@ export function VoiceLab() {
               title={v.persona}
             >
               <VoiceAvatar voice={v} size={40} active={v.id === voiceId} />
-              <span className="n-labout-name">{v.name}</span>
+              <span className="n-labout-text">
+                <span className="n-labout-name">{v.name}</span>
+                {v.gender ? <span className="n-voice-gender">{v.gender}</span> : null}
+              </span>
               <span
                 className="n-labout-play"
                 role="button"
@@ -151,6 +154,7 @@ export function VoiceLab() {
             <VoiceAvatar voice={voiceById(voiceId)!} size={64} active />
             <div>
               <div className="n-cast-name">{voiceById(voiceId)!.name}</div>
+              {voiceById(voiceId)!.gender ? <div className="n-voice-gender">{voiceById(voiceId)!.gender}</div> : null}
               <div className="n-cast-persona">{voiceById(voiceId)!.persona}</div>
               <div className="n-cast-id mono">{voiceById(voiceId)!.id}</div>
             </div>

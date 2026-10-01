@@ -12,7 +12,8 @@ for (const file of modelFiles('kokoro-q8')) await modelStore.complete(file.url, 
 });
 class TestWorker {
   static instances: TestWorker[] = [];
-  static nextMode: 'normal' | 'load-stall' | 'synthesis-stall' | 'send-error' | 'gpu-load-error' | 'gpu-synthesis-error' | 'gpu-and-cpu-error' = 'normal';
+  static nextMode: 'normal' | 'load-stall' | 'synthesis-stall' | 'send-error' | 'gpu-load-error' | 'gpu-synthesis-error' |
+    'gpu-and-cpu-error' | 'gpu-load-stall' | 'gpu-synthesis-stall' = 'normal';
   static onCreated: (() => void) | undefined;
   readonly mode = TestWorker.nextMode;
   onmessage: ((event: { data: unknown }) => void) | null = null;
@@ -20,12 +21,24 @@ class TestWorker {
   terminated = false;
   requests: KokoroRequest[] = [];
   cpu = false;
-  constructor() { TestWorker.instances.push(this); TestWorker.onCreated?.(); }
+  replacedPreviousTerminated = false;
+  constructor() {
+    this.replacedPreviousTerminated = TestWorker.instances.at(-1)?.terminated ?? false;
+    TestWorker.instances.push(this);
+    TestWorker.onCreated?.();
+  }
   postMessage(request: KokoroRequest) {
     if (this.mode === 'send-error') throw new Error('Worker message could not be sent');
     this.requests.push(request);
     if (request.type === 'load') this.cpu = request.device === 'wasm';
+    const accelerated = this.mode.startsWith('gpu-');
+    if (request.type === 'load') {
+      const phase: KokoroReply = { id: request.id, type: 'backend', backend: accelerated && !this.cpu ? 'webgpu' : 'wasm' };
+      queueMicrotask(() => this.onmessage?.({ data: phase }));
+    }
     if (this.mode === 'load-stall' || (this.mode === 'synthesis-stall' && request.type === 'synthesize')) return;
+    if (!this.cpu && (this.mode === 'gpu-load-stall' && request.type === 'load' ||
+      this.mode === 'gpu-synthesis-stall' && request.type === 'synthesize')) return;
     if ((this.mode === 'gpu-load-error' || this.mode === 'gpu-and-cpu-error') && request.type === 'load' &&
       (!this.cpu || this.mode === 'gpu-and-cpu-error') ||
       this.mode === 'gpu-synthesis-error' && request.type === 'synthesize' && !this.cpu) {
@@ -34,7 +47,6 @@ class TestWorker {
       queueMicrotask(() => this.onmessage?.({ data: reply }));
       return;
     }
-    const accelerated = this.mode.startsWith('gpu-');
     const reply: KokoroReply = request.type === 'load'
       ? { id: request.id, type: 'ready', ...(accelerated ? { runtime: { backend: this.cpu ? 'wasm' as const : 'webgpu' as const,
           wasmThreads: 1, crossOriginIsolated: false, reason: 'Verification host provider' } } : {}) }
@@ -161,6 +173,7 @@ try {
   const replacement = TestWorker.instances[firstIndex + 1];
   assert.equal(TestWorker.instances.length, firstIndex + 2, 'GPU failure creates exactly one fresh runtime');
   assert.equal(failed.terminated, true, 'a poisoned GPU runtime is released before CPU initialization');
+  assert.equal(replacement.replacedPreviousTerminated, true, 'CPU worker creation follows termination of the failed GPU worker');
   assert.equal(replacement.requests[0].cacheId, 'kokoro-fp32', 'CPU fallback preserves the selected model');
   assert.equal(replacement.requests[0].device, 'wasm');
   failed.onmessage!({ data: { id: failed.requests[0].id, type: 'ready', runtime: { backend: 'webgpu' } } });
@@ -186,6 +199,52 @@ try {
   assert.equal(TestWorker.instances[firstIndex].requests[0].device, 'wasm');
 } finally { inferenceFallback.dispose(); }
 
+TestWorker.nextMode = 'gpu-load-stall';
+const initializationTimeoutFallback = new WebKokoroEngine('kokoro-fp32', { loadTimeoutMs: 20, synthesisTimeoutMs: 20 });
+try {
+  const firstIndex = TestWorker.instances.length;
+  const result = await settledWithin(initializationTimeoutFallback.load(), 'GPU initialization deadline and CPU fallback');
+  assert.equal(result.state, 'resolved', 'a stalled announced GPU initialization automatically retries on CPU');
+  assert.equal(initializationTimeoutFallback.ready, true, 'backend notification does not finish initialization before ready');
+  assert.equal(initializationTimeoutFallback.runtime?.backend, 'wasm');
+  assert.match(initializationTimeoutFallback.runtime?.reason ?? '', /GPU.*fail|GPU.*unavailable/i);
+  const failed = TestWorker.instances[firstIndex];
+  const replacement = TestWorker.instances[firstIndex + 1];
+  assert.equal(TestWorker.instances.length, firstIndex + 2, 'GPU load timeout creates exactly one replacement');
+  assert.equal(failed.terminated, true);
+  assert.equal(replacement.replacedPreviousTerminated, true, 'timed-out GPU worker is released before CPU worker creation');
+  assert.equal(replacement.requests[0].device, 'wasm', 'GPU load timeout forces CPU instead of repeating GPU initialization');
+  assert.equal(replacement.requests[0].cacheId, 'kokoro-fp32', 'timeout fallback preserves the installed edition');
+  failed.onmessage!({ data: { id: failed.requests[0].id, type: 'backend', backend: 'webgpu' } });
+  failed.onmessage!({ data: { id: failed.requests[0].id, type: 'ready', runtime: { backend: 'webgpu' } } });
+  assert.equal(initializationTimeoutFallback.runtime?.backend, 'wasm', 'late backend phases from a failed worker cannot change CPU ownership');
+} finally { initializationTimeoutFallback.dispose(); }
+
+TestWorker.nextMode = 'gpu-synthesis-stall';
+const inferenceTimeoutFallback = new WebKokoroEngine('kokoro-fp32', { loadTimeoutMs: 20, synthesisTimeoutMs: 20 });
+try {
+  await inferenceTimeoutFallback.load();
+  assert.equal(inferenceTimeoutFallback.runtime?.backend, 'webgpu');
+  const firstIndex = TestWorker.instances.length;
+  const sentences = ['A timed-out GPU sentence.', 'Another pending GPU sentence.'];
+  const jobs = sentences.map((sentence) => inferenceTimeoutFallback.synthesize(sentence, 'af_heart', { speed: 1.25 }));
+  const result = await settledWithin(Promise.all(jobs), 'GPU synthesis deadline and shared CPU fallback');
+  assert.equal(result.state, 'resolved', 'GPU synthesis timeout retries every pending sentence on CPU');
+  for (const chunk of await Promise.all(jobs)) {
+    assert.deepEqual([...chunk.samples], [0.25, -0.25]);
+    assert.equal(chunk.sampleRate, 24000);
+  }
+  assert.equal(inferenceTimeoutFallback.runtime?.backend, 'wasm');
+  assert.equal(TestWorker.instances.length, firstIndex + 1, 'timed-out concurrent GPU requests share one CPU replacement');
+  const replacement = TestWorker.instances[firstIndex];
+  assert.equal(replacement.replacedPreviousTerminated, true);
+  assert.equal(replacement.requests[0].device, 'wasm');
+  assert.equal(replacement.requests[0].cacheId, 'kokoro-fp32');
+  assert.deepEqual(replacement.requests.filter((request) => request.type === 'synthesize').map(({ text, voiceId, speed }) =>
+    ({ text, voiceId, speed })), sentences.map((text) => ({ text, voiceId: 'af_heart', speed: 1.25 })),
+  'CPU retry preserves each sentence, narrator and pace');
+} finally { inferenceTimeoutFallback.dispose(); }
+
 TestWorker.nextMode = 'gpu-and-cpu-error';
 const failedFallback = new WebKokoroEngine('kokoro-fp32');
 try {
@@ -196,7 +255,7 @@ try {
   assert.equal(TestWorker.instances.length, firstIndex + 2, 'CPU failure is surfaced after one fallback, never retried forever');
 } finally { failedFallback.dispose(); }
 
-TestWorker.nextMode = 'load-stall';
+TestWorker.nextMode = 'gpu-load-stall';
 const cancelledGpuFallback = new WebKokoroEngine('kokoro-fp32');
 try {
   const created = new Promise<void>((resolve) => { TestWorker.onCreated = resolve; });
@@ -212,6 +271,44 @@ try {
   assert.equal(TestWorker.instances.length, count, 'cancelling between GPU failure and its retry prevents resurrection');
   assert.equal(cancelledGpuFallback.runtime, null);
 } finally { TestWorker.onCreated = undefined; cancelledGpuFallback.dispose(); }
+
+TestWorker.nextMode = 'gpu-load-stall';
+const cancelledGpuPhase = new WebKokoroEngine('kokoro-fp32', { loadTimeoutMs: 20, synthesisTimeoutMs: 20 });
+try {
+  const created = new Promise<void>((resolve) => { TestWorker.onCreated = resolve; });
+  const loading = cancelledGpuPhase.load();
+  const rejection = assert.rejects(loading, /cancelled/i);
+  await created;
+  TestWorker.onCreated = undefined;
+  await Promise.resolve();
+  assert.equal(cancelledGpuPhase.ready, false, 'announcing GPU does not resolve a pending model load');
+  const count = TestWorker.instances.length;
+  const failed = TestWorker.instances.at(-1)!;
+  cancelledGpuPhase.dispose();
+  await rejection;
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(failed.terminated, true);
+  assert.equal(TestWorker.instances.length, count, 'cancelling an announced GPU load clears its fallback deadline');
+  assert.equal(cancelledGpuPhase.runtime, null);
+} finally { TestWorker.onCreated = undefined; cancelledGpuPhase.dispose(); }
+
+TestWorker.nextMode = 'gpu-synthesis-stall';
+const cancelledInferenceFallback = new WebKokoroEngine('kokoro-fp32');
+try {
+  await cancelledInferenceFallback.load();
+  const failed = TestWorker.instances.at(-1)!;
+  const first = cancelledInferenceFallback.synthesize('Cancel a failed GPU sentence.', 'af_heart');
+  const second = cancelledInferenceFallback.synthesize('Cancel its pending companion.', 'af_heart');
+  const rejections = Promise.all([assert.rejects(first, /Cancelled GPU synthesis/), assert.rejects(second, /Cancelled GPU synthesis/)]);
+  while (failed.requests.filter((request) => request.type === 'synthesize').length < 2) await Promise.resolve();
+  const request = failed.requests.find((request) => request.type === 'synthesize')!;
+  const count = TestWorker.instances.length;
+  failed.onmessage!({ data: { id: request.id, type: 'error', backend: 'webgpu', error: 'Cancelled GPU synthesis' } });
+  cancelledInferenceFallback.dispose();
+  await rejections;
+  assert.equal(TestWorker.instances.length, count, 'cancelling between GPU inference failure and CPU retry prevents resurrection');
+  assert.equal(cancelledInferenceFallback.runtime, null);
+} finally { cancelledInferenceFallback.dispose(); }
 
 const hostNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {
@@ -229,4 +326,14 @@ try {
   if (hostNavigator) Object.defineProperty(globalThis, 'navigator', hostNavigator);
   else Reflect.deleteProperty(globalThis, 'navigator');
 }
-console.log('Worker regressions passed: failure recovery, bounded load and synthesis, all pending request rejection, fresh-worker retry, stale callback isolation and disposal.');
+TestWorker.nextMode = 'normal';
+const cpuOverride = new WebKokoroEngine('kokoro-fp32', { backendPreference: 'wasm' });
+try {
+  await cpuOverride.load();
+  const request = TestWorker.instances.at(-1)!.requests[0];
+  assert.equal(request.device, 'wasm', 'CPU compatibility bypasses GPU without waiting for a GPU error');
+  assert.equal(request.cacheId, 'kokoro-fp32', 'CPU compatibility retains full-precision weights');
+  await cpuOverride.synthesize('Keep my chosen edition.', 'af_heart', { speed: 1.25 });
+  assert.deepEqual(TestWorker.instances.at(-1)!.requests.at(-1)!.voiceId, 'af_heart');
+} finally { cpuOverride.dispose(); }
+console.log('Worker regressions passed: backend phase handling, failure and timeout CPU fallback, bounded load and synthesis, shared fresh-worker retry, stale callback isolation and cancellation during GPU fallback. Worker hardware and inference are substituted.');

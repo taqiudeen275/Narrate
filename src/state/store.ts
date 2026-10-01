@@ -12,7 +12,8 @@ import { DEFAULT_MODEL_ID, MODEL_VARIANTS } from '../core/tts/downloads';
 import { beginBackgroundWork, endBackgroundWork } from '../core/background';
 import { loadDeviceMeasurements, recordGenerationMeasurement } from '../core/tts/device';
 import { SAMPLE_DOC } from './sample';
-import { storage, type LibraryEntry, type GenerationJob } from './persistence';
+import { storage, type LibraryEntry, type GenerationJob, type NarrationProfile } from './persistence';
+import { APP_VERSION } from '../version';
 
 export type { LibraryEntry, GenerationJob } from './persistence';
 export type MainView = 'player' | 'reader' | 'library' | 'work' | 'models' | 'voices' | 'lab' | 'settings';
@@ -25,6 +26,9 @@ interface State {
   hydrated: boolean;
   activeDocId: string | null;
   selectedModel: string;
+  backendPreference: 'auto' | 'wasm';
+  /** Identity of the PCM currently loaded for playback, independent of generation. */
+  audioProfile: NarrationProfile | null;
   doc: Doc | null;
   view: MainView;
   readerMode: ReaderMode;
@@ -62,8 +66,9 @@ interface Actions {
   setVoice: (id: string) => void;
   setSpeed: (s: number) => void;
   selectModel: (id: string) => Promise<void>;
+  setBackendPreference: (preference: 'auto' | 'wasm') => Promise<void>;
   ensureEngine: () => Promise<void>;
-  generate: (mode: GenerateMode) => Promise<void>;
+  generate: (mode: GenerateMode, options?: { fresh?: boolean }) => Promise<void>;
   toggle: () => Promise<void>;
   seekTime: (t: number) => void;
   seekWord: (wordIndex: number) => Promise<void>;
@@ -76,6 +81,7 @@ interface Run {
   id: string; docId: string; doc: Doc; voiceId: string; speed: number; engine: TtsEngine;
   mode: GenerateMode; cancelled: boolean; playRequested: boolean; waiting: boolean;
   from: number; seekTarget: number | null; seekWordIndex: number | null;
+  epoch: number; freshAudio: boolean; replacementStarted: boolean; previousProfile: NarrationProfile | null;
 }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 const freshId = () => crypto.randomUUID();
@@ -97,17 +103,17 @@ export const useNarrate = create<State & Actions>((set, get) => {
   let selectionEpoch = 0;
   const report = (error: unknown) => set({ error: message(error) });
   const preferences = () => storage.savePreferences({ voiceId: get().voiceId, speed: get().speed,
-    selectedModel: get().selectedModel, generateMode: get().generateMode }).catch(report);
+    selectedModel: get().selectedModel, generateMode: get().generateMode,
+    backendPreference: get().backendPreference }).catch(report);
   const updateJob = async (id: string, patch: Partial<GenerationJob>) => {
     set(state => ({ generationJobs: state.generationJobs.map(job => job.id === id ? { ...job, ...patch } : job) }));
     await storage.saveJobs(get().generationJobs);
   };
-  const updateEntry = async (id: string, count: number, total: number) => {
-    const { engine, voiceId, speed } = get();
+  const updateEntry = async (id: string, count: number, total: number, profile: NarrationProfile) => {
     set(state => ({ library: state.library.map(entry => {
       if (entry.id !== id || !count && entry.narration) return entry;
       return { ...entry, renderedCount: count, totalSentences: total, audioReady: count === total && total > 0,
-        narration: count ? { modelId: engine.id, voiceId, speed } : undefined };
+        narration: count ? { ...profile } : undefined };
     }) }));
     await storage.saveLibrary(get().library);
   };
@@ -135,7 +141,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
     await storage.saveLibrary(library);
     if (epoch !== selectionEpoch) return false;
     get().player.setTimeline([]);
-    set({ doc, activeDocId: id, busy: false, status: 'Ready', playing: false,
+    set({ doc, activeDocId: id, audioProfile: null, busy: false, status: 'Ready', playing: false,
       time: 0, duration: 0, renderedCount: 0, currentWord: null, currentSentence: null, targetSentence: 0 });
     return true;
   };
@@ -172,18 +178,20 @@ export const useNarrate = create<State & Actions>((set, get) => {
     },
     onError: report,
   });
-  const restoreAudio = async (epoch: number) => {
+  const restoreAudio = async (epoch: number, savedProfile?: NarrationProfile) => {
     const { activeDocId, doc, voiceId, speed, engine, player } = get();
     if (!activeDocId || !doc) return;
-    const key = storage.narrationKey(activeDocId, engine.id, voiceId, speed);
+    const profile = savedProfile ?? { modelId: engine.id, voiceId, speed };
+    const key = storage.narrationKey(activeDocId, profile.modelId, profile.voiceId, profile.speed);
     const segments = await storage.loadNarration(key);
     if (epoch !== selectionEpoch || get().activeDocId !== activeDocId) return;
     clearTiming(doc); player.setTimeline(segments);
     for (const segment of player.segments) distributeSentence(doc, segment.sentenceIndex, segment.start, segment.start + segment.duration);
-    set({ doc: { ...doc }, time: 0, duration: player.duration, renderedCount: player.renderedCount,
+    set({ doc: { ...doc }, audioProfile: segments.length ? { ...profile } : null,
+      time: 0, duration: player.duration, renderedCount: player.renderedCount,
       currentWord: null, currentSentence: null, targetSentence: 0, playing: false,
       status: segments.length === doc.sentences.length ? 'Saved audio ready' : segments.length ? 'Saved progress ready' : 'Ready' });
-    await updateEntry(activeDocId, player.renderedCount, doc.sentences.length);
+    await updateEntry(activeDocId, player.renderedCount, doc.sentences.length, profile);
   };
   const render = async (run: Run) => {
     if (!current(run)) return;
@@ -191,12 +199,13 @@ export const useNarrate = create<State & Actions>((set, get) => {
     try {
       await storage.saveJobs(get().generationJobs);
       const key = storage.narrationKey(run.docId, run.engine.id, run.voiceId, run.speed);
-      const saved = await storage.loadNarration(key);
+      const profile = { modelId: run.engine.id, voiceId: run.voiceId, speed: run.speed };
+      const saved = run.freshAudio ? [] : await storage.loadNarration(key);
       if (!current(run)) return;
       const player = get().player;
       clearTiming(run.doc); player.setTimeline(saved);
       for (const segment of player.segments) distributeSentence(run.doc, segment.sentenceIndex, segment.start, segment.start + segment.duration);
-      set({ renderedCount: saved.length, duration: player.duration, doc: { ...run.doc } });
+      set({ audioProfile: saved.length ? profile : null, renderedCount: saved.length, duration: player.duration, doc: { ...run.doc } });
       await updateJob(run.id, { completedSentences: saved.length });
       if (!current(run)) return;
       if (saved.length < run.doc.sentences.length) {
@@ -205,6 +214,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
         await get().ensureEngine();
         if (!current(run)) return;
         if (!run.engine.ready) throw new Error(get().engineError ?? 'The model could not be loaded.');
+        await updateJob(run.id, { runtime: run.engine.runtime ? { ...run.engine.runtime } : undefined });
       }
       if (run.mode === 'stream' && saved.length >= Math.min(2, run.doc.sentences.length)) await startPlayback(run);
       for (let index = saved.length; index < run.doc.sentences.length; index++) {
@@ -220,19 +230,22 @@ export const useNarrate = create<State & Actions>((set, get) => {
           duration: chunk.samples.length / chunk.sampleRate,
           start: previous ? previous.start + previous.duration + SENTENCE_GAP : EDGE_PAD };
         await storage.saveSegment(key, segment);
+        run.replacementStarted = true;
         if (!current(run)) return;
         player.putSentence(index, chunk.samples, chunk.sampleRate);
         const placed = player.segments.find(s => s.sentenceIndex === index)!;
         distributeSentence(run.doc, index, placed.start, placed.start + placed.duration);
-        set({ doc: { ...run.doc }, renderedCount: index + 1, duration: player.duration,
+        set({ doc: { ...run.doc }, audioProfile: profile, renderedCount: index + 1, duration: player.duration,
           status: `Saving narration ${index + 1} / ${run.doc.sentences.length}` });
-        await updateEntry(run.docId, index + 1, run.doc.sentences.length);
-        await updateJob(run.id, { completedSentences: index + 1 });
+        await updateEntry(run.docId, index + 1, run.doc.sentences.length, profile);
+        await updateJob(run.id, { completedSentences: index + 1,
+          runtime: run.engine.runtime ? { ...run.engine.runtime } : undefined });
         if (!current(run)) return;
         if (run.playRequested && (run.waiting || index + 1 >= Math.min(2, run.doc.sentences.length))) await startPlayback(run);
       }
       if (!current(run)) return;
-      await updateEntry(run.docId, player.renderedCount, run.doc.sentences.length);
+      await updateEntry(run.docId, player.renderedCount, run.doc.sentences.length, profile);
+      if (!current(run)) return;
       await updateJob(run.id, { status: 'completed', finishedAt: Date.now(), completedSentences: player.renderedCount });
       if (!current(run)) return;
       if (run.playRequested) await startPlayback(run);
@@ -245,11 +258,19 @@ export const useNarrate = create<State & Actions>((set, get) => {
       await updateJob(run.id, { status: 'failed', finishedAt: Date.now(), error: message(error) }).catch(report);
     } finally {
       if (activeRun === run) activeRun = null;
+      // Before the first successful replacement, the stored take is untouched.
+      // Restore it after failure/Stop, unless another document or run took over.
+      if (run.freshAudio && !run.replacementStarted && run.epoch === selectionEpoch
+        && get().activeDocId === run.docId && !activeRun) {
+        const status = get().status;
+        await restoreAudio(run.epoch, run.previousProfile ?? undefined).catch(report);
+        if (run.epoch === selectionEpoch) set({ status });
+      }
       if (background) await endBackgroundWork().catch(report);
     }
   };
   return {
-    library: [], generationJobs: [], hydrated: false, activeDocId: null, selectedModel: DEFAULT_MODEL_ID,
+    library: [], generationJobs: [], hydrated: false, activeDocId: null, selectedModel: DEFAULT_MODEL_ID, backendPreference: 'auto', audioProfile: null,
     doc: null, view: 'library', readerMode: 'page', generateMode: 'stream',
     voiceId: DEFAULT_VOICE_ID, speed: 1, engine: new WebKokoroEngine(), player,
     engineReady: false, engineLoading: false, modelProgress: null, engineError: null,
@@ -265,9 +286,10 @@ export const useNarrate = create<State & Actions>((set, get) => {
           const generationJobs = jobs.map(job => job.status === 'running' ? { ...job, status: 'interrupted' as const, finishedAt: Date.now() } : job);
           const selectedModel = MODEL_VARIANTS.some(model => model.cacheId === prefs?.selectedModel)
             ? prefs!.selectedModel : DEFAULT_MODEL_ID;
-          const changedModel = selectedModel !== get().selectedModel;
-          set({ library, generationJobs, hydrated: true, view: 'library', selectedModel,
-            engine: changedModel ? new WebKokoroEngine(selectedModel) : get().engine,
+          const backendPreference = prefs?.backendPreference === 'wasm' ? 'wasm' : 'auto';
+          const changedEngine = selectedModel !== get().selectedModel || backendPreference !== get().backendPreference;
+          set({ library, generationJobs, hydrated: true, view: 'library', selectedModel, backendPreference,
+            engine: changedEngine ? new WebKokoroEngine(selectedModel, { backendPreference }) : get().engine,
             voiceId: typeof prefs?.voiceId === 'string' && voiceById(prefs.voiceId) ? prefs.voiceId : DEFAULT_VOICE_ID,
             speed: Number.isFinite(prefs?.speed) && prefs!.speed >= 0.5 && prefs!.speed <= 2 ? prefs!.speed : 1,
             generateMode: prefs?.generateMode === 'full' ? 'full' : 'stream' });
@@ -300,22 +322,16 @@ export const useNarrate = create<State & Actions>((set, get) => {
         if (!doc) throw new Error('The saved document could not be found. Import the original file again.');
         if (epoch !== selectionEpoch) return;
         const saved = get().library.find(entry => entry.id === id)?.narration;
-        if (saved && voiceById(saved.voiceId) && Number.isFinite(saved.speed) && saved.speed >= 0.5 && saved.speed <= 2) {
-          const oldEngine = get().engine;
-          const supported = MODEL_VARIANTS.some(model => model.cacheId === saved.modelId);
-          if (supported || saved.modelId === oldEngine.id) {
-            const engine = saved.modelId === oldEngine.id ? oldEngine : new WebKokoroEngine(saved.modelId);
-            if (engine !== oldEngine) void production.catch(() => undefined).then(() => oldEngine.dispose());
-            set({ engine, selectedModel: supported ? saved.modelId : get().selectedModel,
-              voiceId: saved.voiceId, speed: saved.speed, engineReady: engine.ready,
-              engineLoading: false, engineError: null, modelProgress: null });
-            void preferences();
-          }
+        const validSaved = saved && voiceById(saved.voiceId) && Number.isFinite(saved.speed) && saved.speed >= 0.5 && saved.speed <= 2
+          && (MODEL_VARIANTS.some(model => model.cacheId === saved.modelId) || saved.modelId === get().engine.id);
+        if (validSaved) {
+          set({ voiceId: saved.voiceId, speed: saved.speed });
+          void preferences();
         }
         get().player.setTimeline([]);
-        set({ doc, activeDocId: id, renderedCount: 0, time: 0, duration: 0, playing: false,
+        set({ doc, activeDocId: id, audioProfile: null, renderedCount: 0, time: 0, duration: 0, playing: false,
           currentWord: null, currentSentence: null, targetSentence: 0 });
-        await restoreAudio(epoch);
+        await restoreAudio(epoch, validSaved ? saved : undefined);
         if (epoch === selectionEpoch) set({ busy: false });
       } catch (error) { if (epoch === selectionEpoch) set({ busy: false, error: message(error) }); }
     },
@@ -337,7 +353,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
       set(state => ({ library: state.library.filter(entry => entry.id !== id) }));
       if (get().activeDocId === id) {
         cancelRun(); ++selectionEpoch; get().player.setTimeline([]);
-        set({ doc: null, activeDocId: null, playing: false, time: 0, duration: 0, renderedCount: 0,
+        set({ doc: null, activeDocId: null, audioProfile: null, playing: false, time: 0, duration: 0, renderedCount: 0,
           currentWord: null, currentSentence: null, busy: false, view: 'library' });
       }
       try {
@@ -356,14 +372,14 @@ export const useNarrate = create<State & Actions>((set, get) => {
     setVoice(voiceId) {
       if (!voiceById(voiceId) || voiceId === get().voiceId) return;
       cancelRun(); const epoch = ++selectionEpoch; get().player.setTimeline([]);
-      set({ voiceId, playing: false, renderedCount: 0, time: 0, duration: 0 });
+      set({ voiceId, audioProfile: null, playing: false, renderedCount: 0, time: 0, duration: 0 });
       void preferences(); void restoreAudio(epoch).catch(report);
     },
     setSpeed(speed) {
       if (!Number.isFinite(speed)) return;
       speed = Math.max(0.5, Math.min(2, speed)); if (speed === get().speed) return;
       cancelRun(); const epoch = ++selectionEpoch; get().player.setTimeline([]);
-      set({ speed, playing: false, renderedCount: 0, time: 0, duration: 0 });
+      set({ speed, audioProfile: null, playing: false, renderedCount: 0, time: 0, duration: 0 });
       void preferences(); void restoreAudio(epoch).catch(report);
     },
     async selectModel(selectedModel) {
@@ -372,9 +388,20 @@ export const useNarrate = create<State & Actions>((set, get) => {
       const oldEngine = get().engine;
       void production.catch(() => undefined).then(() => oldEngine.dispose());
       get().player.setTimeline([]);
-      set({ selectedModel, engine: new WebKokoroEngine(selectedModel), engineReady: false, engineLoading: false,
+      set({ selectedModel, audioProfile: null, engine: new WebKokoroEngine(selectedModel, { backendPreference: get().backendPreference }), engineReady: false, engineLoading: false,
         modelProgress: null, engineError: null, playing: false, renderedCount: 0, time: 0, duration: 0 });
       await preferences(); await restoreAudio(epoch);
+    },
+    async setBackendPreference(backendPreference) {
+      if (!['auto', 'wasm'].includes(backendPreference) || backendPreference === get().backendPreference) return;
+      cancelRun(); ++selectionEpoch;
+      const oldEngine = get().engine;
+      void production.catch(() => undefined).then(() => oldEngine.dispose());
+      get().player.pause();
+      set({ backendPreference, engine: new WebKokoroEngine(get().selectedModel, { backendPreference }),
+        engineReady: false, engineLoading: false, modelProgress: null, engineError: null, playing: false,
+        status: 'Generation setting updated · saved audio kept' });
+      await preferences();
     },
     async ensureEngine() {
       const engine = get().engine;
@@ -387,22 +414,26 @@ export const useNarrate = create<State & Actions>((set, get) => {
         if (get().engine === engine) set({ engineReady: false, engineLoading: false, engineError: message(error), error: message(error), status: 'Model failed to load' });
       }
     },
-    async generate(mode) {
-      const { doc, activeDocId, voiceId, speed, engine, time } = get();
+    async generate(mode, options) {
+      const { doc, activeDocId, voiceId, speed, engine, time, audioProfile, renderedCount } = get();
       if (!doc || !activeDocId) return;
       cancelRun();
-      ++selectionEpoch;
+      const epoch = ++selectionEpoch;
+      const freshAudio = options?.fresh === true;
       const run: Run = { id: freshId(), docId: activeDocId, doc, voiceId, speed, engine, mode,
-        cancelled: false, playRequested: mode === 'stream', waiting: false, from: time, seekTarget: null, seekWordIndex: null };
-      const job: GenerationJob = { id: run.id, docId: activeDocId, title: doc.title, voiceId, modelId: engine.id, speed, mode,
-        status: 'running', startedAt: Date.now(), completedSentences: get().renderedCount, totalSentences: doc.sentences.length };
+        cancelled: false, playRequested: mode === 'stream', waiting: false, from: freshAudio ? 0 : time, seekTarget: null, seekWordIndex: null,
+        epoch, freshAudio, replacementStarted: false, previousProfile: audioProfile };
+      const sameAudio = audioProfile?.modelId === engine.id && audioProfile.voiceId === voiceId && audioProfile.speed === speed;
+      const job: GenerationJob = { id: run.id, docId: activeDocId, title: doc.title, voiceId, modelId: engine.id,
+        requestedModelId: get().selectedModel, appVersion: APP_VERSION, speed, mode,
+        freshAudio, status: 'running', startedAt: Date.now(), completedSentences: !freshAudio && sameAudio ? renderedCount : 0, totalSentences: doc.sentences.length };
       activeRun = run; get().player.pause();
       set(state => ({ busy: true, playing: run.playRequested, error: null, cancel: cancelRun, generateMode: mode,
         status: mode === 'full' ? 'Rendering all · saving locally' : 'Preparing stream', generationJobs: [job, ...state.generationJobs] }));
       const task = production.catch(() => undefined).then(() => render(run)); production = task; await task;
     },
     async toggle() {
-      const { doc, player, renderedCount } = get(); if (!doc) return;
+      const { doc, player, renderedCount, audioProfile, engine } = get(); if (!doc) return;
       if (activeRun && current(activeRun)) {
         const run = activeRun;
         run.playRequested = !run.playRequested;
@@ -416,7 +447,9 @@ export const useNarrate = create<State & Actions>((set, get) => {
         }
         return;
       }
-      if (renderedCount < doc.sentences.length) { await get().generate(get().generateMode); return; }
+      if (renderedCount < doc.sentences.length && (!audioProfile || audioProfile.modelId === engine.id)) {
+        await get().generate(get().generateMode); return;
+      }
       await player.toggle(); set({ playing: player.isRunning, duration: player.duration });
     },
     seekTime(time) {

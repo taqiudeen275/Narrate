@@ -21,6 +21,7 @@ export interface KokoroRequest {
 }
 
 export type KokoroReply =
+  | { id: number; type: 'backend'; backend: KokoroBackend }
   | { id: number; type: 'ready'; runtime?: KokoroRuntimeInfo }
   | { id: number; type: 'chunk'; samples: Float32Array; sampleRate: number }
   | { id: number; type: 'error'; error: string; backend?: KokoroBackend };

@@ -5,6 +5,7 @@ import { VoiceAvatar } from '../design/VoiceAvatar';
 import { LineWave, audioPeaks } from '../design/Waveform';
 import { Icon } from '../design/Icon';
 import { voiceById } from '../core/tts/voices';
+import { MODEL_VARIANTS } from '../core/tts/downloads';
 
 function PlaybackWave({ peaks, working }: { peaks: readonly number[]; working: boolean }) {
   const { time, duration, playing } = useNarrate(useShallow((state) => ({ time: state.time, duration: state.duration, playing: state.playing })));
@@ -14,11 +15,13 @@ function PlaybackWave({ peaks, working }: { peaks: readonly number[]; working: b
 
 export function PlayerView({ onPickVoice }: { onPickVoice?: () => void }) {
   const { doc, duration, playing, currentSentence, voiceId, setView,
-    busy, engineLoading, modelProgress, renderedCount, player, status, cancel, exportAudio, generateMode } = useNarrate(useShallow((state) => ({
+    busy, engineLoading, modelProgress, renderedCount, player, status, cancel, exportAudio, generateMode,
+    audioProfile, engine, generate } = useNarrate(useShallow((state) => ({
       doc: state.doc, duration: state.duration, playing: state.playing, currentSentence: state.currentSentence,
       voiceId: state.voiceId, setView: state.setView, busy: state.busy, engineLoading: state.engineLoading,
       modelProgress: state.modelProgress, renderedCount: state.renderedCount, player: state.player,
       status: state.status, cancel: state.cancel, exportAudio: state.exportAudio, generateMode: state.generateMode,
+      audioProfile: state.audioProfile, engine: state.engine, generate: state.generate,
     })));
   const voice = voiceById(voiceId);
   const peaks = useMemo(() => audioPeaks(player.segments.map((segment) => segment.samples)), [player, doc, renderedCount]);
@@ -27,6 +30,7 @@ export function PlayerView({ onPickVoice }: { onPickVoice?: () => void }) {
   const complete = total > 0 && renderedCount === total;
   const fraction = engineLoading ? modelProgress?.fraction ?? null : total > 0 ? renderedCount / total : null;
   const percent = fraction === null ? null : Math.min(100, Math.round(fraction * 100));
+  const savedModel = audioProfile ? MODEL_VARIANTS.find(model => model.cacheId === audioProfile.modelId)?.name ?? audioProfile.modelId : null;
   if (!doc) return null;
 
   return (
@@ -35,6 +39,7 @@ export function PlayerView({ onPickVoice }: { onPickVoice?: () => void }) {
         <div className="n-player-meta">
           <h1 className="n-player-title heading">{doc.title}</h1>
           <div className="n-player-stats">{doc.words.length.toLocaleString()} words · about {Math.max(1, Math.round(doc.words.length / 150))} min</div>
+          {savedModel ? <div className="n-player-stats" aria-label="Saved audio model">Saved audio: {savedModel}</div> : null}
         </div>
         <button type="button" className="n-player-voice" disabled={working} onClick={() => onPickVoice?.()} aria-label="Change narrator">
           {voice ? <VoiceAvatar voice={voice} size={38} active={playing} /> : null}
@@ -59,6 +64,8 @@ export function PlayerView({ onPickVoice }: { onPickVoice?: () => void }) {
         </section> : null}
 
       <div className="n-player-actions">
+        {audioProfile && audioProfile.modelId !== engine.id ? <button type="button" className="pill pill-primary" disabled={working}
+          onClick={() => void generate(generateMode)}><Icon name="voice" size={17} />Generate with {engine.name}</button> : null}
         <button type="button" className="pill" onClick={() => setView('reader')}><Icon name="page" size={17} />Follow the text</button>
         {complete ? <><button type="button" className="pill" disabled={working} onClick={() => void exportAudio('wav')}><Icon name="download" size={15} />WAV</button><button type="button" className="pill" disabled={working} onClick={() => void exportAudio('mp3')}><Icon name="download" size={15} />MP3</button></> : <button type="button" className="pill" onClick={() => setView('library')}><Icon name="library" size={16} />Library</button>}
       </div>

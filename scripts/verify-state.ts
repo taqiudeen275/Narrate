@@ -172,11 +172,115 @@ await open('another-model.txt', 'Another document changes the current model.');
 await useNarrate.getState().generate('full');
 const beforeModelReopen = calls;
 await useNarrate.getState().openLibraryDoc(modelCacheId);
-assert.equal(useNarrate.getState().selectedModel, 'kokoro-q4', 'opening restores the saved model edition');
-assert.equal(useNarrate.getState().engine.ready, false, 'saved audio needs no loaded inference engine');
+assert.equal(useNarrate.getState().selectedModel, 'kokoro-q8', 'opening saved audio preserves the selected generation edition');
+assert.equal(useNarrate.getState().engine.id, 'kokoro-q8', 'saved playback never replaces the selected generation engine');
+assert.equal(useNarrate.getState().audioProfile?.modelId, 'kokoro-q4', 'saved PCM retains its own model identity');
 await useNarrate.getState().toggle();
 assert.equal(calls, beforeModelReopen, 'a different global model never forces cached narration to regenerate');
 player.pause();
+
+const beforeImmediateStop = calls;
+const immediateStopRun = useNarrate.getState().generate('full');
+const immediateStopJobId = useNarrate.getState().generationJobs[0].id;
+const stopBeforeRender = useNarrate.getState().cancel;
+assert.ok(stopBeforeRender, 'Stop is available before the selected edition starts rendering');
+stopBeforeRender();
+await immediateStopRun;
+const immediatelyStopped = useNarrate.getState().generationJobs.find(job => job.id === immediateStopJobId)!;
+assert.equal(immediatelyStopped.modelId, 'kokoro-q8');
+assert.equal(immediatelyStopped.status, 'cancelled');
+assert.equal(immediatelyStopped.completedSentences, 0,
+  'an immediately stopped attempt must not count another edition\'s saved PCM as its own generation');
+assert.equal((await storage.load()).jobs.find(job => job.id === immediateStopJobId)?.completedSentences, 0,
+  'persisted Work progress excludes the different edition\'s saved PCM');
+assert.equal(calls, beforeImmediateStop, 'an immediate Stop prevents synthesis');
+assert.equal(useNarrate.getState().audioProfile?.modelId, 'kokoro-q4', 'an immediate Stop retains the saved playback edition');
+assert.equal(player.renderedCount, 1, 'an immediate Stop retains the existing saved audio');
+
+await open('stop-final-write.txt', 'Keep the saved audio when generation is stopped.');
+await useNarrate.getState().generate('full');
+const finalWriteDocId = useNarrate.getState().activeDocId!;
+let reachedFinalWrite!: () => void;
+let releaseFinalWrite!: () => void;
+const finalWriteReached = new Promise<void>(resolve => { reachedFinalWrite = resolve; });
+const finalWriteGate = new Promise<void>(resolve => { releaseFinalWrite = resolve; });
+const originalSaveLibrary = storage.saveLibrary;
+storage.saveLibrary = async entries => {
+  reachedFinalWrite();
+  await finalWriteGate;
+  await originalSaveLibrary(entries);
+};
+let finalizingRun: Promise<void> | undefined;
+try {
+  // A fully cached attempt performs one Library write at finalization.
+  finalizingRun = useNarrate.getState().generate('full');
+  await finalWriteReached;
+  const finalJobId = useNarrate.getState().generationJobs[0].id;
+  const stop = useNarrate.getState().cancel;
+  assert.ok(stop, 'Stop remains available while the final Library write is pending');
+  stop();
+  assert.equal(useNarrate.getState().generationJobs[0].status, 'cancelled');
+  releaseFinalWrite();
+  await finalizingRun;
+  assert.equal(useNarrate.getState().generationJobs.find(job => job.id === finalJobId)?.status, 'cancelled',
+    'finishing the final Library write must not overwrite an explicit Stop with completed');
+  assert.equal((await storage.load()).jobs.find(job => job.id === finalJobId)?.status, 'cancelled',
+    'persisted Work history keeps the explicit Stop after the final Library write');
+  assert.equal(useNarrate.getState().library.find(entry => entry.id === finalWriteDocId)?.audioReady, true,
+    'Stop during finalization retains the complete saved PCM');
+} finally {
+  releaseFinalWrite();
+  storage.saveLibrary = originalSaveLibrary;
+  await finalizingRun;
+}
+
+// A fresh take must bypass this profile's saved PCM, while keeping other
+// documents/editions and retaining the old take if the first sentence fails.
+const recoveryDocId = useNarrate.getState().activeDocId!;
+const recoveryEngine = useNarrate.getState().engine;
+const recoveryVoice = useNarrate.getState().voiceId;
+const recoverySpeed = useNarrate.getState().speed;
+const recoveryKey = storage.narrationKey(recoveryDocId, recoveryEngine.id, recoveryVoice, recoverySpeed);
+const otherKey = storage.narrationKey(recoveryDocId, 'kokoro-fp32', recoveryVoice, recoverySpeed);
+const oldTake = await storage.loadNarration(recoveryKey);
+assert.ok(oldTake.length > 0);
+await storage.saveSegment(otherKey, oldTake[0]);
+const otherDocumentKey = storage.narrationKey(cachedVoiceId, 'test-engine', cachedVoice, cachedSpeed);
+const otherDocument = await storage.loadNarration(otherDocumentKey);
+assert.ok(otherDocument.length > 0);
+const normalSynthesis = recoveryEngine.synthesize;
+try {
+  recoveryEngine.synthesize = async () => { throw new Error('First replacement sentence failed'); };
+  await useNarrate.getState().generate('full', { fresh: true });
+  assert.equal(useNarrate.getState().generationJobs[0].status, 'failed', 'a fresh take performs new synthesis instead of replaying the completed cache');
+  assert.deepEqual(await storage.loadNarration(recoveryKey), oldTake, 'failed replacement leaves previous audio intact');
+  assert.equal(player.renderedCount, oldTake.length, 'failed replacement restores previous playback');
+
+  let releaseFresh!: () => void;
+  let reachedFresh!: () => void;
+  const freshReached = new Promise<void>(resolve => { reachedFresh = resolve; });
+  const freshGate = new Promise<void>(resolve => { releaseFresh = resolve; });
+  recoveryEngine.synthesize = async () => { reachedFresh(); await freshGate;
+    return { samples: new Float32Array([0.25, -0.25]), sampleRate: 10, duration: 0.2 }; };
+  const cancelledFresh = useNarrate.getState().generate('full', { fresh: true });
+  await freshReached;
+  useNarrate.getState().cancel!();
+  releaseFresh(); await cancelledFresh;
+  assert.deepEqual(await storage.loadNarration(recoveryKey), oldTake, 'Stop before a replacement arrives keeps previous PCM');
+  assert.equal(player.renderedCount, oldTake.length, 'Stop before replacement restores previous playback');
+
+  recoveryEngine.synthesize = async () => ({ samples: new Float32Array([0.25, -0.25]), sampleRate: 10, duration: 0.2 });
+  await useNarrate.getState().generate('full', { fresh: true });
+  const freshTake = await storage.loadNarration(recoveryKey);
+  assert.equal(freshTake.length, oldTake.length);
+  assert.deepEqual([...freshTake[0].samples], [0.25, -0.25], 'fresh audio replaces only the chosen narration');
+  assert.deepEqual(await storage.loadNarration(otherKey), [oldTake[0]], 'another edition remains saved');
+  assert.deepEqual(await storage.loadNarration(otherDocumentKey), otherDocument, 'another document remains saved');
+  assert.equal(useNarrate.getState().generationJobs[0].freshAudio, true, 'Work records a fresh take');
+  await useNarrate.getState().openLibraryDoc(recoveryDocId);
+  assert.deepEqual([...player.segments[0].samples], [0.25, -0.25], 'reopening plays the replacement without synthesis');
+} finally { recoveryEngine.synthesize = normalSynthesis; }
+
 Object.assign(globalThis, { window: {}, isTauri: true });
 try {
   mockIPC((command) => {

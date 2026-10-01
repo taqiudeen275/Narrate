@@ -47,8 +47,8 @@ export function VoicePicker({ onPickVoice }: { onPickVoice?: () => void }) {
           <h1 className="n-panel-title">Narrators</h1>
           <p className="n-panel-sub">
             {voices.length} voices, all running locally in {engine.name}. A narrator is a
-            speaker inside one model's weights, so this list belongs to {engine.name} and
-            changes when the engine does. Listen before you commit — no automatic score
+            speaker inside a model's weights. Balanced, Full precision and 4-bit share
+            the same Kokoro narrators. Listen before you commit — no automatic score
             can tell you which narrator suits a book.
           </p>
         </div>
@@ -112,6 +112,7 @@ export function VoicePicker({ onPickVoice }: { onPickVoice?: () => void }) {
                   <span className="n-vcard-persona">{v.persona}</span>
                   <span className="n-vcard-tags">
                     <span className="n-sheet-model">{engine.name}</span>
+                    {v.gender ? <span className="n-voice-gender">{v.gender}</span> : null}
                     <span className="n-vcard-accent">{v.accent}</span>
                     {v.clonable ? (
                       <span className="n-sheet-model n-sheet-model-clone">clonable</span>

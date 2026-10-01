@@ -1,9 +1,11 @@
 import { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Icon, type IconName } from '../design/Icon';
 import { ScrubTrack, audioPeaks } from '../design/Waveform';
 import { useNarrate } from '../state/store';
 import { VoiceAvatar } from '../design/VoiceAvatar';
 import { voiceById } from '../core/tts/voices';
+import { MODEL_VARIANTS } from '../core/tts/downloads';
 
 function clock(t: number): string {
   if (!Number.isFinite(t) || t < 0) t = 0;
@@ -50,10 +52,17 @@ export function Transport({ onPickVoice }: { onPickVoice?: () => void }) {
   const {
     doc, playing, time, duration, voiceId, targetSentence,
     toggle, stepSentence, stepParagraph, seekTime,
-    busy, engineLoading, modelProgress, renderedCount, engine, player, generateMode,
-  } = useNarrate();
+    busy, engineLoading, modelProgress, renderedCount, engine, player, generateMode, audioProfile,
+  } = useNarrate(useShallow((state) => ({
+    doc: state.doc, playing: state.playing, time: state.time, duration: state.duration, voiceId: state.voiceId,
+    targetSentence: state.targetSentence, toggle: state.toggle, stepSentence: state.stepSentence,
+    stepParagraph: state.stepParagraph, seekTime: state.seekTime, busy: state.busy,
+    engineLoading: state.engineLoading, modelProgress: state.modelProgress, renderedCount: state.renderedCount,
+    engine: state.engine, player: state.player, generateMode: state.generateMode, audioProfile: state.audioProfile,
+  })));
 
   const voice = voiceById(voiceId);
+  const modelName = audioProfile ? MODEL_VARIANTS.find(model => model.cacheId === audioProfile.modelId)?.name ?? audioProfile.modelId : engine.name;
   const total = doc?.sentences.length ?? 0;
   const progress = duration > 0 ? Math.min(1, time / duration) : 0;
   const working = busy || engineLoading;
@@ -147,14 +156,14 @@ export function Transport({ onPickVoice }: { onPickVoice?: () => void }) {
         type="button"
         className="n-transport-voice"
         onClick={() => onPickVoice?.()}
-        aria-label={`Narrator: ${voice?.name ?? voiceId}, from ${engine.name}. Change narrator`}
-        title={`${voice?.name ?? voiceId} — ${engine.name}`}
+        aria-label={`Narrator: ${voice?.name ?? voiceId}, from ${modelName}. Change narrator`}
+        title={`${voice?.name ?? voiceId} — ${modelName}`}
       >
         {voice ? <VoiceAvatar voice={voice} size={38} active={playing} /> : null}
         <span className="n-transport-voice-text">
           <span className="label">Narrator</span>
           <span className="n-transport-voice-name">{voice?.name ?? '—'}</span>
-          <span className="n-transport-voice-model">{engine.name}</span>
+          <span className="n-transport-voice-model">{modelName}</span>
         </span>
       </button>
 

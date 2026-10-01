@@ -16,6 +16,8 @@ import { SUPPORTED_VOICE_IDS } from './downloads';
 
 /** A presentable narrator: a model-bound voice, with a name and a face. */
 export interface Voice extends VoiceInfo {
+  /** Vendor-described gender for a known preset; absent when undocumented. */
+  gender?: 'Female' | 'Male';
   /** The engine id this voice belongs to, e.g. the stem of `af_bella`. */
   stem: string;
   /** Hue used for this voice's generated avatar. */
@@ -39,6 +41,27 @@ export const SAMPLE_PHRASE =
   'The quiet room held its breath, and every word arrived exactly on time.';
 
 type Seed = [id: string, name: string, persona: string, accent: string];
+
+/**
+ * Gender metadata from kokoro-js 1.2.1's VOICES catalogue. Keep this small
+ * metadata copy here so rendering a narrator never imports the inference
+ * runtime. IDs outside the documented catalogue are intentionally unlabelled.
+ */
+const KOKORO_GENDERS: Readonly<Partial<Record<string, 'Female' | 'Male'>>> = {
+  af_heart: 'Female', af_alloy: 'Female', af_aoede: 'Female',
+  af_bella: 'Female', af_jessica: 'Female', af_kore: 'Female',
+  af_nicole: 'Female', af_nova: 'Female', af_river: 'Female',
+  af_sarah: 'Female', af_sky: 'Female',
+  am_adam: 'Male', am_echo: 'Male', am_eric: 'Male',
+  am_fenrir: 'Male', am_liam: 'Male', am_michael: 'Male',
+  am_onyx: 'Male', am_puck: 'Male', am_santa: 'Male',
+  bf_emma: 'Female', bf_isabella: 'Female', bf_alice: 'Female', bf_lily: 'Female',
+  bm_george: 'Male', bm_lewis: 'Male', bm_daniel: 'Male', bm_fable: 'Male',
+};
+
+function documentedGender(id: string): Voice['gender'] {
+  return Object.hasOwn(KOKORO_GENDERS, id) ? KOKORO_GENDERS[id] : undefined;
+}
 
 /**
  * Curated casting notes for Kokoro's voices. Editorial characterisations
@@ -77,6 +100,7 @@ function buildVoice([id, name, persona, accent]: Seed, i: number): Voice {
     name,
     persona,
     accent,
+    gender: documentedGender(id),
     engine: 'kokoro',
     clonable: false,
     stem: id,
@@ -113,6 +137,7 @@ function voiceFor(info: VoiceInfo): Voice {
     name: info.name || titleise(info.id),
     persona: info.persona || 'No casting note for this voice yet.',
     accent: info.accent || 'Unknown',
+    gender: documentedGender(info.id),
     engine: info.engine,
     clonable: info.clonable,
     stem: info.id,

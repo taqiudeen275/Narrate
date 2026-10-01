@@ -12,6 +12,7 @@ import { VoiceSheet } from '../src/components/VoiceSheet';
 import { VoiceLab } from '../src/views/VoiceLab';
 import { LibraryView } from '../src/views/LibraryView';
 import { PlayerView } from '../src/views/PlayerView';
+import { Transport } from '../src/components/Transport';
 
 const { window } = parseHTML('<html><body><div id="test"></div></body></html>');
 Object.assign(globalThis, { window, document: window.document, HTMLElement: window.HTMLElement,
@@ -117,6 +118,85 @@ await check('Reader updates at word boundaries, without rerendering every audio 
   assert.equal(window.document.querySelector('.n-w-spent'), null, 'a reset timeline must not retain spent words from the last position');
   assert.equal(window.document.querySelector('.n-w-now'), null, 'leading silence must not highlight the first word early');
 });
+await check('Reader only rebuilds the affected text block during playback and generation', async () => {
+  const text = new DocBuilder();
+  text.add('paragraph', 'First second third.');
+  text.add('quote', 'Next later last.');
+  text.add('code', 'Future words wait.');
+  const indexed = text.build('Stable blocks');
+  distributeSentence(indexed, 0, 1, 4);
+  const reads = [0, 0, 0];
+  for (const word of indexed.words) {
+    const surface = word.text;
+    Object.defineProperty(word, 'text', { get() { reads[word.blockIndex]++; return surface; } });
+  }
+  useNarrate.setState({ doc: indexed, time: 1.1, currentSentence: indexed.sentences[0], readerMode: 'page',
+    activeDocId: 'stable-blocks', playing: false, renderedCount: 1 });
+  await render(createElement(ReaderView));
+  reads.fill(0);
+  await act(async () => useNarrate.setState({ time: indexed.words[1].startTime! + 0.01 }));
+  assert.ok(reads[0] > 0, 'the playing block must update its word highlight');
+  assert.deepEqual(reads.slice(1), [0, 0], 'a word boundary must leave every inactive block cached');
+  assert.equal(window.document.querySelector('.n-w-now')?.textContent, 'second');
+  reads.fill(0);
+  await act(async () => {
+    distributeSentence(indexed, 1, 5, 8);
+    useNarrate.setState({ doc: { ...indexed }, renderedCount: 2 });
+  });
+  assert.equal(reads[0], 0, 'saving a later sentence must leave the playing block cached');
+  assert.ok(reads[1] > 0, 'newly generated words must update their seek availability');
+  assert.equal(reads[2], 0, 'saving a sentence must leave the remaining untimed blocks cached');
+  assert.equal(window.document.querySelector('.n-block-quote .n-w')?.getAttribute('title'), 'Play from here');
+  assert.equal(window.document.querySelector('.n-block-code .n-w')?.getAttribute('title'), 'Render and play from here');
+  reads.fill(0);
+  await act(async () => useNarrate.setState({ doc: { ...indexed } }));
+  assert.deepEqual(reads, [0, 0, 0], 'a timing wrapper update alone must reuse all text content');
+  await act(async () => {
+    for (const word of indexed.words) { word.startTime = null; word.endTime = null; }
+    for (const sentence of indexed.sentences) { sentence.startTime = null; sentence.endTime = null; }
+    useNarrate.setState({ doc: { ...indexed }, renderedCount: 0, time: 0 });
+  });
+  assert.equal(window.document.querySelector('[title="Play from here"]'), null, 'a new narration must reset seek availability');
+  assert.equal(window.document.querySelector('.n-w-spent, .n-w-now'), null, 'a timing reset must clear playback highlights');
+});
+await check('Reader memoized blocks retain seeking and follow the next block', async () => {
+  const text = new DocBuilder(); text.add('paragraph', 'First second.'); text.add('paragraph', 'Third fourth.');
+  const indexed = text.build('Seek boundaries');
+  distributeSentence(indexed, 0, 1, 3); distributeSentence(indexed, 1, 4, 6);
+  const sought: number[] = [];
+  const originalSeek = useNarrate.getState().seekWord;
+  try {
+    useNarrate.setState({ doc: indexed, time: 1.1, currentSentence: indexed.sentences[0], readerMode: 'page',
+      playing: true, activeDocId: 'seek-boundaries', seekWord: async index => { sought.push(index); } });
+    await render(createElement(ReaderView));
+    await act(async () => window.document.querySelector('article')!.dispatchEvent(new window.Event('wheel')));
+    scrolled = [];
+    await click(window.document.querySelectorAll('.n-w')[1]);
+    assert.deepEqual(sought, [1], 'pointer seeking must preserve the exact word index');
+    await act(async () => {
+      const event = new window.Event('keydown', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'key', { value: 'Enter' });
+      window.document.querySelectorAll('.n-w')[3].dispatchEvent(event);
+    });
+    assert.deepEqual(sought, [1, 3], 'keyboard seeking must preserve the exact word index');
+    scrolled = [];
+    await act(async () => useNarrate.setState({ time: 5.1, currentSentence: indexed.sentences[1] }));
+    assert.equal(window.document.querySelector('.n-w-now')?.textContent, 'fourth');
+    assert.equal(scrolled.length, 1, 'follow must use the active word ref after entering a cached block');
+  } finally { await act(async () => useNarrate.setState({ seekWord: originalSeek })); }
+});
+await check('Transport ignores generation metadata and keeps playback position current', async () => {
+  let commits = 0;
+  useNarrate.setState({ doc, time: 0, duration: 10, busy: false, playing: false, engineLoading: false });
+  await render(createElement(Profiler, { id: 'transport', onRender: () => { commits++; } }, createElement(Transport)));
+  const mounted = commits;
+  await act(async () => useNarrate.setState({ library: [...useNarrate.getState().library] }));
+  await act(async () => useNarrate.setState({ generationJobs: [...useNarrate.getState().generationJobs] }));
+  assert.equal(commits, mounted, 'saving Library/Work metadata must not rebuild the playback controls');
+  await act(async () => useNarrate.setState({ time: 5 }));
+  assert.equal(window.document.querySelector('[aria-label="Position in document"]')?.getAttribute('aria-valuenow'), '50');
+  assert.ok(commits > mounted, 'playback position changes must still update the transport');
+});
 await check('Listen keeps the current sentence visible during streaming and exposes saved progress', async () => {
   let cancelled = false;
   useNarrate.setState({ doc, currentSentence: doc.sentences[1], renderedCount: 1, busy: true, engineLoading: false,
@@ -176,6 +256,22 @@ await check('Library awaits file bytes before importing the actual filename and 
   assert.equal(imported[0].name, 'selected-document.pdf');
   assert.equal(imported[0].buffer, bytes);
   assert.deepEqual(opened, ['player']);
+});
+
+await check('Saved playback identifies its edition and offers generation with the selected model', async () => {
+  const calls: string[] = [];
+  useNarrate.setState({ doc, busy: false, engineLoading: false, renderedCount: doc.sentences.length,
+    audioProfile: { modelId: 'kokoro-q8', voiceId: 'af_bella', speed: 1 }, generateMode: 'full',
+    engine: { id: 'kokoro-fp32', name: 'Kokoro · Full precision', ready: true,
+      async load() {}, voices: () => [], dispose() {}, async synthesize() { throw new Error('No inference during a UI check'); } },
+    generate: async mode => { calls.push(mode); } });
+  await render(createElement(PlayerView));
+  assert.match(window.document.querySelector('[aria-label="Saved audio model"]')?.textContent ?? '', /Balanced/,
+    'saved PCM must not be labelled with the selected generation edition');
+  const action = Array.from(window.document.querySelectorAll('button')).find(button => button.textContent?.includes('Generate with'));
+  assert.match(action?.textContent ?? '', /Full precision/);
+  await click(action ?? null);
+  assert.deepEqual(calls, ['full'], 'the explicit action generates with the currently chosen mode');
 });
 
 class TestSource {

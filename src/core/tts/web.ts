@@ -10,6 +10,7 @@ class WorkerBackendError extends Error {
 }
 
 export interface WebKokoroOptions {
+  backendPreference?: 'auto' | 'wasm';
   /** Deadlines cover worker execution, after the resumable download finishes. */
   loadTimeoutMs?: number;
   synthesisTimeoutMs?: number;
@@ -24,7 +25,9 @@ export class WebKokoroEngine implements TtsEngine {
   private nextRequest = 0;
   private epoch = 0;
   private runtimeState: KokoroRuntimeInfo | null = null;
+  private workerBackend: KokoroBackend | null = null;
   private gpuDisabled = false;
+  private readonly backendPreference: 'auto' | 'wasm';
   private readonly loadTimeoutMs: number;
   private readonly synthesisTimeoutMs: number;
   private requests = new Map<number, {
@@ -37,6 +40,7 @@ export class WebKokoroEngine implements TtsEngine {
     const model = modelVariant(cacheId);
     this.id = model.cacheId;
     this.name = model.name;
+    this.backendPreference = options.backendPreference ?? 'auto';
     // Allow slower phones ample time for WASM initialization and each sentence,
     // while keeping a living but wedged worker from holding a job forever.
     this.loadTimeoutMs = options.loadTimeoutMs ?? 5 * 60_000;
@@ -76,6 +80,10 @@ export class WebKokoroEngine implements TtsEngine {
       if (this.worker !== worker || epoch !== this.epoch) return;
       const pending = this.requests.get(data.id);
       if (!pending) return;
+      if (data.type === 'backend') {
+        this.workerBackend = data.backend;
+        return;
+      }
       this.requests.delete(data.id);
       clearTimeout(pending.timer);
       if (data.type === 'error' && data.backend === 'webgpu') {
@@ -90,16 +98,17 @@ export class WebKokoroEngine implements TtsEngine {
     };
     worker.onerror = (event) => {
       if (this.worker !== worker || epoch !== this.epoch) return;
-      const error = new WorkerBackendError(event.message || 'The voice engine stopped. Reload the model to continue.', this.runtimeState?.backend);
+      const error = new WorkerBackendError(event.message || 'The voice engine stopped. Reload the model to continue.', this.workerBackend ?? this.runtimeState?.backend);
       if (error.backend === 'webgpu') this.gpuDisabled = true;
       this.stopWorker(error);
     };
-    const reply = await this.request({ type: 'load', cacheId: this.cacheId, device: this.gpuDisabled ? 'wasm' : 'auto',
+    const reply = await this.request({ type: 'load', cacheId: this.cacheId, device: this.gpuDisabled ? 'wasm' : this.backendPreference,
       mobile: isKokoroMobileHost(typeof navigator === 'undefined' ? undefined : navigator) });
     if (epoch !== this.epoch) throw new DOMException('Model load cancelled', 'AbortError');
     if (reply.type !== 'ready') throw new Error('The voice engine did not finish initialization.');
     this.runtimeState = reply.runtime ? { ...reply.runtime,
       ...(this.gpuDisabled && reply.runtime.backend === 'wasm' ? { reason: 'GPU execution failed; using CPU inference.' } : {}) } : null;
+    this.workerBackend = reply.runtime?.backend ?? this.workerBackend;
     this.loaded = true;
   }
 
@@ -113,7 +122,7 @@ export class WebKokoroEngine implements TtsEngine {
         if (this.worker !== worker) return;
         const error = new WorkerBackendError(payload.type === 'load'
           ? 'Loading the voice engine timed out. Try loading the model again.'
-          : 'Generating audio timed out. Try narration again.', this.runtimeState?.backend);
+          : 'Generating audio timed out. Try narration again.', this.workerBackend ?? this.runtimeState?.backend);
         if (error.backend === 'webgpu') this.gpuDisabled = true;
         this.stopWorker(error);
       }, timeout);
@@ -129,6 +138,7 @@ export class WebKokoroEngine implements TtsEngine {
     this.epoch++;
     this.loaded = false;
     this.runtimeState = null;
+    this.workerBackend = null;
     this.loading = null;
     this.worker?.terminate();
     this.worker = null;

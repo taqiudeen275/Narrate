@@ -1,6 +1,9 @@
-import { get, set, del, keys } from 'idb-keyval';
+import { get, set, setMany, del, keys } from 'idb-keyval';
 import type { Doc } from '../core/types';
 import type { Segment } from '../core/audio/player';
+import type { KokoroRuntimeInfo } from '../core/tts/worker-types';
+
+export interface NarrationProfile { modelId: string; voiceId: string; speed: number }
 
 export interface LibraryEntry {
   id: string;
@@ -13,7 +16,7 @@ export interface LibraryEntry {
   renderedCount: number;
   totalSentences: number;
   audioReady: boolean;
-  narration?: { modelId: string; voiceId: string; speed: number };
+  narration?: NarrationProfile;
 }
 
 export interface GenerationJob {
@@ -23,6 +26,11 @@ export interface GenerationJob {
   voiceId: string;
   /** Earlier saved attempts predate model-edition tracking. */
   modelId?: string;
+  requestedModelId?: string;
+  runtime?: KokoroRuntimeInfo;
+  appVersion?: string;
+  /** An explicit replacement bypasses previously saved PCM for this profile. */
+  freshAudio?: boolean;
   speed: number;
   mode: 'stream' | 'full';
   status: 'running' | 'completed' | 'cancelled' | 'failed' | 'interrupted';
@@ -38,6 +46,7 @@ export interface Preferences {
   speed: number;
   selectedModel: string;
   generateMode: 'stream' | 'full';
+  backendPreference?: 'auto' | 'wasm';
 }
 
 const LIBRARY = 'narrate:v1:library';
@@ -85,10 +94,12 @@ export const storage = {
     return segments;
   },
   saveSegment(key: string, segment: Segment) {
-    return write(async () => {
-      await set(`${key}:sentence:${segment.sentenceIndex}`, segment);
-      await set(`${key}:count`, segment.sentenceIndex + 1);
-    });
+    // Commit PCM and its prefix length together. When replacing a take, the
+    // previous count must never expose its old tail after the first new chunk.
+    return write(() => setMany([
+      [`${key}:sentence:${segment.sentenceIndex}`, segment],
+      [`${key}:count`, segment.sentenceIndex + 1],
+    ]));
   },
   removeDocument(id: string) {
     return write(async () => {

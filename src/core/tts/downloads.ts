@@ -28,7 +28,7 @@ export const MODEL_VARIANTS: readonly ModelVariant[] = [
   { cacheId: 'kokoro-q8', name: 'Kokoro · Balanced', dtype: 'q8', file: 'onnx/model_quantized.onnx', sizeBytes: 92361116,
     description: 'The default. 8-bit weights with the smallest download of these editions.' },
   { cacheId: 'kokoro-fp32', name: 'Kokoro · Full precision', dtype: 'fp32', file: 'onnx/model.onnx', sizeBytes: 325532232,
-    description: 'Original 32-bit weights. Needs more storage and memory; useful for comparing the same voice.' },
+    description: 'Original 32-bit weights. Can use GPU acceleration when this device supports it, with CPU fallback. Needs more storage and memory.' },
   { cacheId: 'kokoro-q4', name: 'Kokoro · 4-bit edition', dtype: 'q4', file: 'onnx/model_q4.onnx', sizeBytes: 305215966,
     description: 'An alternative quantization for comparison. This export is 305 MB, so it is larger than Balanced.' },
 ];

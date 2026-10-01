@@ -42,6 +42,7 @@ export function ModelsView() {
     </section>
     <details className="n-model-performance">
       <summary>Generation performance</summary>
+      <p>Selected model: {engine.name}</p>
       {runtime ? <><p>{runtime.backend === 'webgpu' ? 'WebGPU with CPU fallback' : `CPU · ${runtime.wasmThreads} ${runtime.wasmThreads === 1 ? 'thread' : 'threads'}`}</p><p>{runtime.reason}</p>
         {runtime.backend === 'wasm' && runtime.wasmThreads === 1 ? <p>This app environment currently permits one inference thread. Render all can prepare saved audio before listening.</p> : null}</> : <p>Load your selected model to see how generation runs on this device.</p>}
     </details>
@@ -71,6 +72,6 @@ export function ModelsView() {
         </article>;
       })}
     </div>
-    <p className="n-model-note">These are three editions of Kokoro, with 28 supported narrators. Piper, Pocket TTS and the other engines from the earlier catalog are planned integrations; their audio engines are not implemented in this build.</p>
+    <p className="n-model-note">All three Kokoro editions share the same 28 narrators. Precision changes the model weights, storage and generation performance. Piper, Pocket TTS and the other engines from the earlier catalog are planned integrations; their audio engines are not implemented in this build.</p>
   </div>;
 }

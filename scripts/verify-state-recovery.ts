@@ -70,6 +70,23 @@ async function openSampleAndWait() {
   assert.equal(await useNarrate.getState().openSample(), true, 'sample open resolves after selection succeeds');
 }
 
+await test('CPU compatibility persists independently of the selected edition', async () => {
+  await hydratePreferences({ selectedModel: 'kokoro-fp32', voiceId: 'af_heart', speed: 1.25,
+    generateMode: 'full', backendPreference: 'wasm' });
+  assert.equal(useNarrate.getState().backendPreference, 'wasm');
+  assert.equal(useNarrate.getState().selectedModel, 'kokoro-fp32');
+  await useNarrate.getState().setBackendPreference('auto');
+  assert.equal((await storage.load()).preferences?.backendPreference, 'auto');
+  await useNarrate.getState().setBackendPreference('wasm');
+  useNarrate.setState({ hydrated: false, backendPreference: 'auto' });
+  await useNarrate.getState().hydrate();
+  assert.equal(useNarrate.getState().backendPreference, 'wasm');
+  assert.equal(useNarrate.getState().engine.id, 'kokoro-fp32');
+  await hydratePreferences({ selectedModel: 'kokoro-fp32', backendPreference: 'obsolete-provider' });
+  assert.equal(useNarrate.getState().backendPreference, 'auto', 'invalid saved execution options recover without hiding the library');
+  assert.equal(useNarrate.getState().library[0]?.id, savedId);
+});
+
 await test('the sample retains headings, quotes and list items when opened and persisted', async () => {
   await openSampleAndWait();
   const state = useNarrate.getState();

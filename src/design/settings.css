@@ -4,6 +4,7 @@
 .n-settings-head .n-panel-title { margin-block-start: 0; }
 .n-settings-tabs { display: flex; gap: var(--s-2); margin-block-start: var(--s-4); }
 .n-settings-content { display: flex; flex: 1; min-block-size: 0; }
+.n-settings-build { margin: 0; padding: var(--s-2) var(--s-4); font-size: var(--t-2xs); color: var(--ink-2); }
 .n-settings-content .n-panel-view { padding-block-start: 0; }
 .n-settings-content .n-panel-title { font-size: var(--t-xl); font-weight: 500; }
 .n-settings-content .n-panel-head .label { display: none; }

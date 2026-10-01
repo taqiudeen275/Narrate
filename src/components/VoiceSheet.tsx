@@ -167,8 +167,8 @@ export function VoiceSheet({ onClose }: { onClose: () => void }) {
             <div className="label">Casting</div>
             <h2 className="n-sheet-title">Choose a narrator</h2>
             <p className="n-sheet-sub">
-              {voices.length} in this model. Narrators belong to the model that
-              carries them, so this list changes when the engine does.
+              {voices.length} Kokoro narrators, shared by Balanced, Full precision
+              and the 4-bit edition. Choose the voice you want to hear.
             </p>
           </div>
           <button type="button" className="icon-btn" onClick={requestClose} disabled={closing} aria-label="Close">
@@ -205,9 +205,12 @@ export function VoiceSheet({ onClose }: { onClose: () => void }) {
                   <VoiceAvatar voice={v} size={40} active={on} />
                   <span className="n-sheet-text">
                     <span className="n-sheet-name">{v.name}</span>
+                    <span className="n-sheet-voice-meta">
+                      {v.gender ? <span className="n-voice-gender">{v.gender}</span> : null}
+                      <span>{v.accent}</span>
+                    </span>
                     <span className="n-sheet-persona">{v.persona}</span>
                   </span>
-                  <span className="label">{v.accent}</span>
                   {on ? <span className="n-sheet-check"><Icon name="check" size={15} /></span> : null}
                 </button>
                 <button

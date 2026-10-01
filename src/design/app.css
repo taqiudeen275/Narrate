@@ -1182,7 +1182,9 @@
   .n-focus-stage { min-inline-size: 0; padding-inline: var(--s-4); overflow-wrap: anywhere; }
   /* A transparent saddle around the raised Listen control, inspired by the
      supplied navigation clip. Its highlight travels with the selected page. */
-  .n-bottomnav { position: relative; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: end; gap: 0; max-inline-size: 32rem; inline-size: calc(100% - 1.5rem); min-block-size: 4.7rem; margin: 1.1rem auto var(--s-2); padding: 0.35rem 0.4rem 0.45rem; background: transparent; box-shadow: none; border-radius: var(--r-xl); isolation: isolate; }
+  /* The raised Listen control overlaps the page above. Keep this whole layer
+     above page/transport content (1), below alerts (40) and modal sheets (60). */
+  .n-bottomnav { position: relative; z-index: 30; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: end; gap: 0; max-inline-size: 32rem; inline-size: calc(100% - 1.5rem); min-block-size: 4.7rem; margin: 1.1rem auto var(--s-2); padding: 0.35rem 0.4rem 0.45rem; background: transparent; box-shadow: none; border-radius: var(--r-xl); isolation: isolate; }
   .n-bottomnav::before { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit; background: rgb(241 241 239 / 0.4); backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); mask-image: radial-gradient(circle at 50% 0, transparent 0 1.98rem, #000 2.05rem); -webkit-mask-image: radial-gradient(circle at 50% 0, transparent 0 1.98rem, #000 2.05rem); }
   .n-mobile-selection-track { position: absolute; inset: 0.55rem 0.4rem auto; block-size: 2.45rem; pointer-events: none; }
   .n-mobile-selection { display: flex; justify-content: center; inline-size: 20%; block-size: 100%; transition: transform var(--t-mid) var(--ease-out), opacity var(--t-fast) var(--ease); }
@@ -1195,7 +1197,7 @@
   .n-mobile-navbtn-on .n-mobile-navicon { color: var(--accent); transform: translateY(-2px); }
   .n-mobile-navbtn:active .n-mobile-navicon { transform: scale(0.9); }
   .n-mobile-navbtn-center { color: var(--accent); }
-  .n-mobile-navbtn-center .n-mobile-navicon { position: absolute; inset-inline-start: 50%; inset-block-start: -2.35rem; transform: translateX(-50%); inline-size: 3.5rem; block-size: 3.5rem; margin: 0; color: var(--ink-on-green); background: var(--accent); box-shadow: 0 5px 18px rgb(29 59 45 / 0.22); }
+  .n-mobile-navbtn-center .n-mobile-navicon { position: absolute; inset-inline-start: 50%; inset-block-start: -2.57rem; transform: translateX(-50%); inline-size: 3.5rem; block-size: 3.5rem; margin: 0; color: var(--ink-on-green); background: var(--accent); box-shadow: 0 5px 18px rgb(29 59 45 / 0.22); }
   .n-mobile-navbtn-center.n-mobile-navbtn-on .n-mobile-navicon { color: var(--ink-on-green); transform: translateX(-50%); }
   .n-mobile-navbtn-center:active .n-mobile-navicon { transform: translateX(-50%) scale(0.94); }
   .n-mobile-navbtn-center:hover .n-mobile-navicon { color: var(--ink-on-green); background: var(--wash-4); }

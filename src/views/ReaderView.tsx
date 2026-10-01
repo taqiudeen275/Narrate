@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Block, Doc, Word } from '../core/types';
 import { wordAtTime } from '../core/types';
@@ -9,6 +9,73 @@ type Token =
   | { t: 'text'; v: string }
   | { t: 'word'; w: Word }
   | { t: 'break' };
+
+type WordPhase = 'ahead' | 'spent' | 'now';
+interface ReadingTokensProps {
+  tokens: Token[];
+  sentences: Doc['sentences'];
+  currentWordIndex: number;
+  currentSentenceIndex: number;
+  wordPhase: WordPhase;
+  timedTo: number;
+  wordRef: RefObject<HTMLElement | null>;
+  sentenceRefs: Map<number, HTMLElement>;
+  onSeek: (index: number) => void;
+}
+
+function ReadingTokens({ tokens, sentences, currentWordIndex, currentSentenceIndex, wordPhase, timedTo,
+  wordRef, sentenceRefs, onSeek }: ReadingTokensProps) {
+  return tokens.map((tok, i) => {
+    if (tok.t === 'text') return <span key={i}>{tok.v}</span>;
+    if (tok.t === 'break') return <br key={i} />;
+    const w = tok.w;
+    const phase = w.index >= timedTo ? 'ahead' : w.index < currentWordIndex ? 'spent'
+      : w.index === currentWordIndex ? wordPhase : 'ahead';
+    return <span key={i}><span
+      className={`n-w n-w-${phase}${currentSentenceIndex === w.sentenceIndex ? ' n-w-sentence' : ''}`}
+      ref={(el) => {
+        if (w.index === currentWordIndex) wordRef.current = el;
+        if (w.index !== sentences[w.sentenceIndex].wordStart) return;
+        if (el) sentenceRefs.set(w.sentenceIndex, el);
+        else sentenceRefs.delete(w.sentenceIndex);
+      }}
+      onClick={(event) => { event.stopPropagation(); onSeek(w.index); }}
+      role="button" tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault(); event.stopPropagation(); onSeek(w.index);
+        }
+      }}
+      title={w.index < timedTo ? 'Play from here' : 'Render and play from here'}
+    >{w.text}</span></span>;
+  });
+}
+
+// Clip playback and generation positions to each block's range before passing
+// them here. Words elsewhere in the book then leave this content unchanged.
+const ReaderBlock = memo(function ReaderBlock({ block, ...props }: ReadingTokensProps & { block: Block }) {
+  const content = <ReadingTokens {...props} />;
+  return <div className={`n-block n-block-${block.kind}`}>
+    {block.kind === 'heading' ? <h2 className={`n-h n-h-${block.level ?? 2}`}>{content}</h2>
+      : block.kind === 'listItem' ? <p className="n-li"><span className="n-li-mark" aria-hidden="true" /><span className="n-li-text">{content}</span></p>
+      : block.kind === 'quote' ? <blockquote className="n-quote">{content}</blockquote>
+      : block.kind === 'code' ? <pre className="n-code">{content}</pre>
+      : <p className="n-p">{content}</p>}
+  </div>;
+});
+
+/** Streaming fills a contiguous timed prefix, followed by untimed words. */
+function timedWordEnd(doc: Doc | null): number {
+  if (!doc) return 0;
+  let lo = 0;
+  let hi = doc.words.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (doc.words[mid].endTime === null) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
 
 /**
  * Rebuild a block's display text from the word index.
@@ -54,7 +121,7 @@ function tokensOfSentence(doc: Doc, sentenceIndex: number): Token[] {
 
 export function ReaderView() {
   const {
-    doc, activeDocId, playing, currentSentence, currentWord, wordPhase, readerMode, setReaderMode,
+    doc, activeDocId, playing, currentSentence, currentWord, wordPhase, timedTo, readerMode, setReaderMode,
     seekWord, setView,
   } = useNarrate(useShallow((state) => {
     // Timeline resets can precede the next playback callback. Resolve the word
@@ -63,8 +130,9 @@ export function ReaderView() {
     return {
     doc: state.doc, activeDocId: state.activeDocId, playing: state.playing,
     currentSentence: state.currentSentence, currentWord,
-    wordPhase: !currentWord || state.time < (currentWord.startTime ?? 0) ? 'ahead'
-      : currentWord.endTime !== null && state.time >= currentWord.endTime ? 'spent' : 'now',
+    timedTo: timedWordEnd(state.doc),
+    wordPhase: (!currentWord || state.time < (currentWord.startTime ?? 0) ? 'ahead'
+      : currentWord.endTime !== null && state.time >= currentWord.endTime ? 'spent' : 'now') as WordPhase,
     readerMode: state.readerMode, setReaderMode: state.setReaderMode,
     seekWord: state.seekWord, setView: state.setView,
     };
@@ -75,6 +143,7 @@ export function ReaderView() {
   const wordRef = useRef<HTMLElement | null>(null);
   const [following, setFollowing] = useState(true);
   const isFocus = readerMode === 'focus';
+  const onSeek = useCallback((index: number) => { setFollowing(true); void seekWord(index); }, [seekWord]);
 
   const tokensByBlock = useMemo(() => {
     if (!doc) return [];
@@ -87,9 +156,10 @@ export function ReaderView() {
     });
     return doc.blocks.map((b, bi) => {
       const r = ranges.get(bi);
-      return r ? tokeniseBlock(doc, b, r[0], r[1]) : [{ t: 'text' as const, v: doc.plain.slice(b.start, b.end) }];
+      return { from: r?.[0] ?? 0, to: r?.[1] ?? 0,
+        tokens: r ? tokeniseBlock(doc, b, r[0], r[1]) : [{ t: 'text' as const, v: doc.plain.slice(b.start, b.end) }] };
     });
-  }, [doc]);
+  }, [doc?.plain, doc?.blocks, doc?.words]);
 
   // Follow the narrator while playing, but stop following the moment the user
   // takes the scroll. Yanking the page back from someone who is reading ahead is
@@ -136,58 +206,6 @@ export function ReaderView() {
       </div>
     );
   }
-
-  const wordState = (w: Word): string => {
-    if (w.endTime === null) return 'n-w-ahead';
-    if (currentWord && w.index < currentWord.index) return 'n-w-spent';
-    if (w.index === currentWord?.index) return `n-w-${wordPhase}`;
-    return 'n-w-ahead';
-  };
-
-  const renderTokens = (tokens: Token[]) =>
-    tokens.map((tok, i) => {
-      if (tok.t === 'text') return <span key={i}>{tok.v}</span>;
-      if (tok.t === 'break') return <br key={i} />;
-      const w = tok.w;
-      const inSentence = currentSentence?.index === w.sentenceIndex;
-      return (
-        <span key={i}>
-          <span
-            className={[
-              'n-w',
-              wordState(w),
-              inSentence ? 'n-w-sentence' : '',
-            ]
-              .filter(Boolean)
-              .join(' ')}
-            ref={(el) => {
-              if (w.index === currentWord?.index) wordRef.current = el;
-              if (w.index !== doc.sentences[w.sentenceIndex].wordStart) return;
-              if (el) sentenceRefs.current.set(w.sentenceIndex, el);
-              else sentenceRefs.current.delete(w.sentenceIndex);
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-              setFollowing(true);
-              void seekWord(w.index);
-            }}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                e.stopPropagation();
-                setFollowing(true);
-                void seekWord(w.index);
-              }
-            }}
-            title={w.startTime !== null ? 'Play from here' : 'Render and play from here'}
-          >
-            {w.text}
-          </span>
-        </span>
-      );
-    });
 
   /* ------------------------------------------------------------- focus mode ---- */
 
@@ -236,7 +254,9 @@ export function ReaderView() {
                   {/* Rendered as words, not a string: the current word has to
                       highlight here too, or focus mode silently loses the
                       feature it exists to foreground. */}
-                  {renderTokens(tokensOfSentence(doc, i))}
+                  <ReadingTokens tokens={tokensOfSentence(doc, i)} sentences={doc.sentences}
+                    currentWordIndex={currentWord?.index ?? -1} currentSentenceIndex={currentSentence?.index ?? -1}
+                    wordPhase={wordPhase} timedTo={timedTo} wordRef={wordRef} sentenceRefs={sentenceRefs.current} onSeek={onSeek} />
                 </p>
               );
             })}
@@ -273,27 +293,16 @@ export function ReaderView() {
       </div>
 
       <article className="page n-page" ref={scrollRef}>
-        {doc.blocks.map((block, bi) => (
-          <div
-            key={bi}
-            className={`n-block n-block-${block.kind}`}
-          >
-            {block.kind === 'heading' ? (
-              <h2 className={`n-h n-h-${block.level ?? 2}`}>{renderTokens(tokensByBlock[bi])}</h2>
-            ) : block.kind === 'listItem' ? (
-              <p className="n-li">
-                <span className="n-li-mark" aria-hidden="true" />
-                <span className="n-li-text">{renderTokens(tokensByBlock[bi])}</span>
-              </p>
-            ) : block.kind === 'quote' ? (
-              <blockquote className="n-quote">{renderTokens(tokensByBlock[bi])}</blockquote>
-            ) : block.kind === 'code' ? (
-              <pre className="n-code">{renderTokens(tokensByBlock[bi])}</pre>
-            ) : (
-              <p className="n-p">{renderTokens(tokensByBlock[bi])}</p>
-            )}
-          </div>
-        ))}
+        {doc.blocks.map((block, bi) => {
+          const content = tokensByBlock[bi];
+          const currentIndex = currentWord?.index ?? -1;
+          const containsWord = currentIndex >= content.from && currentIndex < content.to;
+          return <ReaderBlock key={bi} block={block} tokens={content.tokens} sentences={doc.sentences}
+            currentWordIndex={Math.max(content.from - 1, Math.min(content.to, currentIndex))}
+            currentSentenceIndex={currentSentence?.blockIndex === bi ? currentSentence.index : -1}
+            wordPhase={containsWord ? wordPhase : 'ahead'} timedTo={Math.max(content.from, Math.min(content.to, timedTo))}
+            wordRef={wordRef} sentenceRefs={sentenceRefs.current} onSeek={onSeek} />;
+        })}
         <div className="n-page-end">
           <span className="label">End of document</span>
         </div>
