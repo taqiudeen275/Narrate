@@ -1,127 +1,90 @@
-/**
- * The Web adapter — the live TTS path today.
- *
- * Runs Kokoro-82M through ONNX Runtime Web via kokoro-js. The model is fetched
- * once and cached by the browser, after which synthesis is entirely local: no
- * request leaves the machine, which is the product's first principle.
- *
- * This adapter exists because the sherpa-onnx native path is blocked on a C++
- * toolchain that is not installed on this machine. Both adapters implement the
- * same interface, so swapping in the native one is a change to which engine is
- * constructed, not to anything above this layer.
- */
-
-import type {
-  EngineChunk,
-  ModelLoadProgress,
-  SynthesisOptions,
-  TtsEngine,
-  VoiceInfo,
-} from './engine';
-import { availableVoices, type Voice } from './voices';
-
-type KokoroInstance = {
-  generate: (
-    text: string,
-    opts: { voice: string; speed?: number },
-  ) => Promise<{ audio: Float32Array; sampling_rate: number }>;
-};
-
-const MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
-
-/**
- * q8 is the shipping choice. The model is unusually well-behaved under
- * quantization, so there is no quality reason to ship the 310 MB fp32 build.
- */
-const DTYPE = 'q8';
+/** Kokoro inference lives in a worker so large sentences do not freeze the UI. */
+import type { EngineChunk, ModelLoadProgress, SynthesisOptions, TtsEngine, VoiceInfo } from './engine';
+import { availableVoices } from './voices';
+import { DEFAULT_MODEL_ID, installModel, modelVariant } from './downloads';
+import type { KokoroReply, KokoroRequest } from './worker-types';
 
 export class WebKokoroEngine implements TtsEngine {
-  readonly id = 'kokoro';
-  readonly name = 'Kokoro 82M';
-  private tts: KokoroInstance | null = null;
+  readonly id: string;
+  readonly name: string;
+  private worker: Worker | null = null;
+  private loaded = false;
   private loading: Promise<void> | null = null;
-  private onProgress: ((p: ModelLoadProgress) => void) | undefined;
+  private nextRequest = 0;
+  private epoch = 0;
+  private requests = new Map<number, { resolve: (reply: KokoroReply) => void; reject: (error: Error) => void }>();
 
-  get ready(): boolean {
-    return this.tts !== null;
+  constructor(readonly cacheId = DEFAULT_MODEL_ID) {
+    const model = modelVariant(cacheId);
+    this.id = model.cacheId;
+    this.name = model.name;
   }
 
-  async load(onProgress?: (p: ModelLoadProgress) => void): Promise<void> {
-    if (this.tts) return;
+  get ready(): boolean { return this.loaded; }
+
+  async load(onProgress?: (progress: ModelLoadProgress) => void): Promise<void> {
+    if (this.loaded) return;
     if (this.loading) return this.loading;
-    this.onProgress = onProgress;
-    this.loading = this.doLoad().catch((err) => {
-      this.loading = null;
-      throw err;
+    const epoch = this.epoch;
+    this.loading = this.doLoad(epoch, onProgress).catch((error) => {
+      if (this.epoch === epoch) {
+        this.loading = null;
+        this.worker?.terminate();
+        this.worker = null;
+      }
+      throw error;
     });
     return this.loading;
   }
 
-  private async doLoad(): Promise<void> {
-    const progress = (r: {
-      status?: string;
-      file?: string;
-      progress?: number;
-      loaded?: number;
-      total?: number;
-    }) => {
-      if (r.status !== 'progress' || !r.file) return;
-      this.onProgress?.({
-        file: r.file,
-        loaded: r.loaded ?? 0,
-        total: r.total ?? 0,
-        fraction: r.total ? (r.loaded ?? 0) / r.total : null,
-      });
+  private async doLoad(epoch: number, onProgress?: (progress: ModelLoadProgress) => void) {
+    await installModel(this.cacheId, onProgress);
+    if (epoch !== this.epoch) throw new DOMException('Model load cancelled', 'AbortError');
+    this.worker = new Worker(new URL('./kokoro.worker.ts', import.meta.url), { type: 'module' });
+    this.worker.onmessage = ({ data }: MessageEvent<KokoroReply>) => {
+      const pending = this.requests.get(data.id);
+      if (!pending) return;
+      this.requests.delete(data.id);
+      if (data.type === 'error') pending.reject(new Error(data.error));
+      else pending.resolve(data);
     };
-    const { KokoroTTS } = await import('kokoro-js');
-    const tts = await KokoroTTS.from_pretrained(MODEL_ID, {
-      dtype: DTYPE,
-      progress_callback: progress,
-    });
-    this.tts = tts as unknown as KokoroInstance;
+    this.worker.onerror = (event) => {
+      const error = new Error(event.message || 'The voice engine stopped. Reload the model to continue.');
+      this.loaded = false;
+      for (const request of this.requests.values()) request.reject(error);
+      this.requests.clear();
+    };
+    await this.request({ type: 'load', cacheId: this.cacheId });
+    if (epoch !== this.epoch) throw new DOMException('Model load cancelled', 'AbortError');
+    this.loaded = true;
   }
 
-  /**
-   * Narrators belong to the model that carries them, so this is the honest
-   * source of truth: whatever this engine reports, not a hardcoded global list.
-   */
-  voices(): VoiceInfo[] {
-    return availableVoices().map((v: Voice) => ({
-      id: v.id,
-      name: v.name,
-      persona: v.persona,
-      accent: v.accent,
-      engine: this.id,
-      clonable: v.clonable,
-    }));
+  private request(payload: Omit<KokoroRequest, 'id'>): Promise<KokoroReply> {
+    if (!this.worker) return Promise.reject(new Error('The voice engine is not loaded.'));
+    const id = ++this.nextRequest;
+    return new Promise((resolve, reject) => {
+      this.requests.set(id, { resolve, reject });
+      this.worker!.postMessage({ ...payload, id });
+    });
   }
 
-  async synthesize(
-    text: string,
-    voiceId: string,
-    opts: SynthesisOptions = {},
-  ): Promise<EngineChunk> {
-    await this.load(this.onProgress);
-    if (!this.tts) throw new Error('Kokoro is not loaded');
-    if (!availableVoices().some((v) => v.id === voiceId)) {
-      throw new Error(`"${voiceId}" is not a voice in ${this.name}.`);
-    }
+  voices(): VoiceInfo[] { return availableVoices().map((voice) => ({ ...voice, engine: this.id })); }
 
-    const out = await this.tts.generate(text, {
-      voice: voiceId,
-      speed: opts.speed ?? 1,
-    });
-
-    const samples = out.audio;
-    return {
-      samples,
-      sampleRate: out.sampling_rate,
-      duration: samples.length / out.sampling_rate,
-    };
+  async synthesize(text: string, voiceId: string, options: SynthesisOptions = {}): Promise<EngineChunk> {
+    await this.load();
+    if (!availableVoices().some((voice) => voice.id === voiceId)) throw new Error(`"${voiceId}" is not a voice in ${this.name}.`);
+    const reply = await this.request({ type: 'synthesize', text, voiceId, speed: options.speed ?? 1 });
+    if (reply.type !== 'chunk') throw new Error('The voice engine returned no audio.');
+    return { samples: reply.samples, sampleRate: reply.sampleRate, duration: reply.samples.length / reply.sampleRate };
   }
 
   dispose(): void {
-    this.tts = null;
+    this.epoch++;
+    this.loaded = false;
     this.loading = null;
+    this.worker?.terminate();
+    this.worker = null;
+    for (const request of this.requests.values()) request.reject(new DOMException('Voice engine cancelled', 'AbortError'));
+    this.requests.clear();
   }
 }

@@ -77,21 +77,25 @@ export async function encodeMp3(
   kbps = 128,
 ): Promise<Blob> {
   const samples = concatFloat32(chunks, sampleRate);
-  const { Mp3Encoder } = await import('lamejs');
-  // lamejs requires a whole number of samples per channel and rejects rates
-  // outside its supported set, so resample rather than emit a corrupt file.
+  const { Mp3Encoder } = await import('@breezystack/lamejs');
+  // The encoder consumes signed 16-bit PCM rather than Web Audio floats.
+  // Resample into a supported rate before writing complete sample blocks.
   const target = sampleRate >= 44100 ? 44100 : sampleRate >= 22050 ? 22050 : 16000;
   const scaled = target === sampleRate ? samples : resample(samples, sampleRate, target);
+  const pcm = Int16Array.from(scaled, (sample) => {
+    const clamped = Math.max(-1, Math.min(1, sample));
+    return Math.round(clamped * (clamped < 0 ? 0x8000 : 0x7fff));
+  });
 
   const enc = new Mp3Encoder(1, target, kbps);
   const block = 1152;
-  const parts: Int8Array[] = [];
-  for (let i = 0; i < scaled.length; i += block) {
-    const buf = enc.encodeBuffer(scaled.subarray(i, i + block));
-    if (buf.length > 0) parts.push(new Int8Array(buf));
+  const parts: Uint8Array[] = [];
+  for (let i = 0; i < pcm.length; i += block) {
+    const buf = enc.encodeBuffer(pcm.subarray(i, i + block));
+    if (buf.length > 0) parts.push(new Uint8Array(buf));
   }
   const tail = enc.flush();
-  if (tail.length > 0) parts.push(new Int8Array(tail));
+  if (tail.length > 0) parts.push(new Uint8Array(tail));
   return new Blob(parts as BlobPart[], { type: 'audio/mpeg' });
 }
 

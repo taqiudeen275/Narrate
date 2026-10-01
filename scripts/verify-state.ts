@@ -81,6 +81,7 @@ assert.equal(player.renderedCount, 7, 'stream continues beyond its initial looka
 assert.equal(useNarrate.getState().library[0].audioReady, true, 'stream saves all generated audio');
 
 await open('cancel.txt', 'Cancel this sentence. Keep the later sentences.');
+const cancelledId = useNarrate.getState().activeDocId!;
 let release!: () => void;
 const gate = new Promise<void>(resolve => { release = resolve; });
 beforeSynthesis = () => gate;
@@ -92,7 +93,7 @@ await pending;
 beforeSynthesis = null;
 assert.match(useNarrate.getState().doc!.plain, /Replacement/);
 assert.equal(player.renderedCount, 0, 'cancelled old synthesis cannot contaminate newly selected document');
-assert.equal(useNarrate.getState().generationJobs.find(j => j.title === 'cancel')!.status, 'cancelled');
+assert.equal(useNarrate.getState().generationJobs.find(j => j.docId === cancelledId)!.status, 'cancelled');
 await useNarrate.getState().removeDoc(firstId);
 assert.equal(useNarrate.getState().library.some(e => e.id === firstId), false);
 console.log('State regressions passed: Library startup, durable documents/audio/audit, cache reuse, full/stream semantics, input failure, cancellation, deletion.');

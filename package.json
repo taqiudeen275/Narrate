@@ -28,7 +28,6 @@
     "idb-keyval": "^6.3.0",
     "jszip": "^3.10.2",
     "kokoro-js": "^1.2.1",
-    "lamejs": "^1.2.1",
     "mammoth": "^1.13.0",
     "marked": "^18.0.14",
     "pdfjs-dist": "^6.3.289",

@@ -12,6 +12,7 @@
  */
 
 import type { VoiceInfo } from './engine';
+import { SUPPORTED_VOICE_IDS } from './downloads';
 
 /** A presentable narrator: a model-bound voice, with a name and a face. */
 export interface Voice extends VoiceInfo {
@@ -92,7 +93,12 @@ const KOKORO_BY_ID = new Map(SEEDS.map(buildVoice).map((v) => [v.id, v]));
  * Every id here is a speaker inside Kokoro's weights; none of them would
  * resolve under a different engine.
  */
-export const KOKORO_VOICES: Voice[] = SEEDS.map(buildVoice);
+export const KOKORO_VOICES: Voice[] = SUPPORTED_VOICE_IDS.map((id, i) => {
+  const curated = SEEDS.find((seed) => seed[0] === id);
+  const accent = id.startsWith('b') ? 'British' : 'American';
+  const name = id.split('_')[1];
+  return buildVoice(curated ?? [id, name.charAt(0).toUpperCase() + name.slice(1), `${accent} English narrator.`, accent], i);
+});
 
 export const DEFAULT_VOICE_ID = 'af_bella';
 
@@ -141,7 +147,5 @@ export function syncVoicesFromEngine(list: VoiceInfo[]): Voice[] {
 }
 
 export function voiceById(id: string): Voice | undefined {
-  return KOKORO_BY_ID.get(id) ?? voiceFor({
-    id, name: '', persona: '', accent: '', engine: 'kokoro', clonable: false,
-  });
+  return KOKORO_VOICES.find((voice) => voice.id === id);
 }

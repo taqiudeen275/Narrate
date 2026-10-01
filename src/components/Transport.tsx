@@ -1,5 +1,6 @@
+import { useMemo } from 'react';
 import { Icon, type IconName } from '../design/Icon';
-import { ScrubTrack } from '../design/Waveform';
+import { ScrubTrack, audioPeaks } from '../design/Waveform';
 import { useNarrate } from '../state/store';
 import { VoiceAvatar } from '../design/VoiceAvatar';
 import { voiceById } from '../core/tts/voices';
@@ -48,14 +49,15 @@ function RoundButton({
 export function Transport({ onPickVoice }: { onPickVoice?: () => void }) {
   const {
     doc, playing, time, duration, voiceId, targetSentence,
-    toggle, stepSentence, stepParagraph, seekWord,
-    busy, engineLoading, modelProgress, renderedCount, engine,
+    toggle, stepSentence, stepParagraph, seekTime,
+    busy, engineLoading, modelProgress, renderedCount, engine, player,
   } = useNarrate();
 
   const voice = voiceById(voiceId);
   const total = doc?.sentences.length ?? 0;
   const progress = duration > 0 ? Math.min(1, time / duration) : 0;
   const working = busy || engineLoading;
+  const peaks = useMemo(() => audioPeaks(player.segments.map((segment) => segment.samples), 72), [player, doc, renderedCount]);
 
   const statusText = engineLoading
     ? modelProgress?.fraction != null
@@ -95,19 +97,17 @@ export function Transport({ onPickVoice }: { onPickVoice?: () => void }) {
         label={playing ? 'Pause' : 'Play'}
         primary
         onClick={() => void toggle()}
-        disabled={!doc || busy}
+        disabled={!doc || (working && !playing)}
       />
 
       <div className="n-transport-track">
         <ScrubTrack
-          seed={(doc?.charCount ?? 7) % 9973}
           progress={progress}
+          peaks={peaks}
           label="Position in document"
-          busy={working}
-          onSeek={(f) => {
-            const s = doc?.sentences[Math.floor(f * Math.max(total - 1, 0))];
-            if (s) void seekWord(s.wordStart);
-          }}
+          busy={working && !duration}
+          disabled={!duration}
+          onSeek={(fraction) => seekTime(fraction * duration)}
         />
         <div className="n-transport-meta">
           <span className="mono">{clock(time)}</span>
