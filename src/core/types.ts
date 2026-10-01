@@ -209,20 +209,22 @@ export function wordAtTime(doc: Doc, t: number): Word | null {
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const w = doc.words[mid];
-    if ((w.endTime ?? 0) < t) lo = mid + 1;
+    // Streaming leaves an untimed suffix. It sorts AFTER the rendered prefix,
+    // rather than at zero, or a binary search skips the words playing now.
+    if (w.endTime === null) hi = mid - 1;
+    else if (w.endTime <= t) lo = mid + 1;
     else {
       next = mid;
       hi = mid - 1;
     }
   }
-  const candidate = doc.words[Math.min(next, doc.words.length - 1)];
-  if (candidate.endTime === null) return null;
+  const candidate = next < doc.words.length ? doc.words[next] : null;
   // Inside this word's window: that is the one being spoken.
-  if (t >= (candidate.startTime ?? 0) && t < candidate.endTime) return candidate;
+  if (candidate && t >= (candidate.startTime ?? 0) && t < candidate.endTime!) return candidate;
   // Otherwise we are in a gap. Take the previous word if we are past its end,
   // so the highlight does not jump ahead during the pause.
-  if (next > 0) {
-    const prev = doc.words[next - 1];
+  if (lo > 0) {
+    const prev = doc.words[lo - 1];
     if (prev.endTime !== null && t >= (prev.startTime ?? 0)) return prev;
   }
   return candidate;

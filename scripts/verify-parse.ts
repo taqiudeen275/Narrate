@@ -106,6 +106,15 @@ const enc = (s: string) => new TextEncoder().encode(s);
 
 console.log('Narrate parser verification');
 
+const list = await parseDocument('list.md', enc('- first item\n- second **item**'));
+check('list-only Markdown retains every item', list.plain === 'first item\n\nsecond item', list.plain);
+const table = await parseDocument('table.md', enc('| Name | Value |\n| -- | -- |\n| Alpha | **Beta** |'));
+check('Markdown tables retain headings and cell text', table.plain === 'Name. Value\n\nAlpha. Beta', table.plain);
+let emptyError = '';
+try { await parseDocument('empty.pdf', new ArrayBuffer(0)); }
+catch (error) { emptyError = error instanceof Error ? error.message : String(error); }
+check('empty binary documents fail before invoking a parser', /empty|no readable text/i.test(emptyError), emptyError);
+
 await verifyDoc('markdown', await parseDocument('t.md', enc(`# Title
 
 First paragraph with a number 1974 and a name O'Shaughnessy.
@@ -177,6 +186,15 @@ check(
     return wordAtTime(doc, mid)?.index === w.index;
   }),
 );
+
+const partial = await parseDocument('partial.txt', enc('One two. Three four. Five six. Seven eight.'));
+distributeSentence(partial, 0, 0.15, 1.15);
+check('streaming resolves words before an untimed document tail', wordAtTime(partial, 0.9)?.text === 'two');
+check('streaming gaps retain the last timed word', wordAtTime(partial, 1.3)?.text === 'two');
+check('untimed documents have no current word', wordAtTime(await parseDocument('new.txt', enc('One two.')), 0) === null);
+const boundary = await parseDocument('boundary.txt', enc('One two.'));
+distributeSentence(boundary, 0, 0, 1);
+check('a word boundary resolves the next word', wordAtTime(boundary, boundary.words[1].startTime!)?.text === 'two');
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);

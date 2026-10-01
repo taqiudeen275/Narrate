@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Narrate">
+  <!--
+    Narrate app mark.
+
+    The glyph is the product's own line wave, using the same three-sine
+    envelope the app draws, so the icon and the hero element are the same
+    shape. Two colours only: the committed deep green and the lit page. The
+    lamp accent is deliberately absent — it is reserved for the current
+    position, and an icon has no position.
+
+    Deep green field rather than a light one: an icon has to survive both a
+    light and a dark wallpaper, and a pale mark on a pale field disappears.
+  -->
+  <defs>
+    <linearGradient id="field" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#2c5442"/>
+      <stop offset="1" stop-color="#1a3529"/>
+    </linearGradient>
+    <linearGradient id="trace" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#cfe0d4"/>
+      <stop offset="0.55" stop-color="#f1ece0"/>
+      <stop offset="1" stop-color="#cfe0d4"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#field)"/>
+
+  <!--
+    Mirrored trace. Hand-authored points rather than generated, so the shape is
+    identical in every raster and can be reviewed as a drawing.
+    Top edge, then bottom edge reversed, as two open subpaths: a closed stroke
+    would draw a vertical wall at each end.
+  -->
+  <g fill="none" stroke="url(#trace)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M76 256
+             C 108 208, 130 188, 160 196
+             C 190 204, 196 238, 224 238
+             C 252 238, 262 176, 296 176
+             C 330 176, 336 244, 366 244
+             C 396 244, 412 196, 436 212"/>
+    <path d="M76 256
+             C 108 304, 130 324, 160 316
+             C 190 308, 196 274, 224 274
+             C 252 274, 262 336, 296 336
+             C 330 336, 336 268, 366 268
+             C 396 268, 412 316, 436 300"/>
+  </g>
+
+  <!-- The playhead: the one place the position is marked. -->
+  <circle cx="76" cy="256" r="17" fill="#e8dfce"/>
+</svg>

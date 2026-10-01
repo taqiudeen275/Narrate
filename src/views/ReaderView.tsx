@@ -147,12 +147,16 @@ export function ReaderView() {
             ]
               .filter(Boolean)
               .join(' ')}
-            onClick={() => void seekWord(w.index)}
+            onClick={(event) => {
+              event.stopPropagation();
+              void seekWord(w.index);
+            }}
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
+                e.stopPropagation();
                 void seekWord(w.index);
               }
             }}

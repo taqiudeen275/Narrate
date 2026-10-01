@@ -118,7 +118,7 @@ export interface PlayerEvents {
   onError?: (err: Error) => void;
 }
 
-type Source = { node: AudioBufferSourceNode; startAt: number };
+type Source = { node: AudioBufferSourceNode; sentenceIndex: number };
 
 export class Player {
   private ctx: AudioContext | null = null;
@@ -134,6 +134,7 @@ export class Player {
   private events: PlayerEvents = {};
   /** Sentence indices already handed to the scheduler, so nothing renders twice. */
   private rendered = new Set<number>();
+  private playbackVersion = 0;
 
   get context(): AudioContext {
     if (!this.ctx) {
@@ -154,7 +155,12 @@ export class Player {
 
   /** Replace the timeline. Safe to call before playback starts. */
   setTimeline(segments: Segment[]): void {
-    this.segments = segments;
+    this.pause();
+    this.originDocTime = 0;
+    this.segments = segments.map((segment) => ({ ...segment }));
+    this.recomputeStarts();
+    this.rendered = new Set(this.segments.map((segment) => segment.sentenceIndex));
+    this.events.onTime?.(0, this.duration);
   }
 
   get duration(): number {
@@ -186,10 +192,18 @@ export class Player {
   ): void {
     const duration = samples.length / sampleRate;
     const existing = this.segments.findIndex((s) => s.sentenceIndex === sentenceIndex);
+    const isAppend = existing < 0 && this.segments.every((segment) => segment.sentenceIndex < sentenceIndex);
     if (existing >= 0) this.segments[existing] = { sentenceIndex, start: 0, duration, samples, sampleRate };
     else this.segments.push({ sentenceIndex, start: 0, duration, samples, sampleRate });
     this.recomputeStarts();
     this.rendered.add(sentenceIndex);
+    if (this.running) {
+      // Appends leave the currently playing source alone. Replacing an earlier
+      // sentence changes future start times, so rebuild that schedule instead.
+      if (!isAppend) this.stopSources();
+      this.scheduleFrom(this.time());
+    }
+    this.events.onTime?.(this.time(), this.duration);
   }
 
   hasSentence(i: number): boolean {
@@ -212,39 +226,47 @@ export class Player {
   /** Current position on the document timeline, seconds. */
   time(): number {
     if (!this.running || !this.ctx) return this.originDocTime;
-    return this.originDocTime + (this.ctx.currentTime - this.originCtxTime);
+    return Math.min(this.duration, this.originDocTime + (this.ctx.currentTime - this.originCtxTime));
   }
 
-  async play(from = this.originDocTime): Promise<void> {
+  async play(from?: number): Promise<void> {
     if (this.segments.length === 0) return;
+    const version = ++this.playbackVersion;
+    cancelAnimationFrame(this.raf);
+    this.stopSources();
+    this.running = false;
     const ctx = this.context;
     if (ctx.state === 'suspended') await ctx.resume();
+    if (version !== this.playbackVersion) return;
 
-    this.stopSources();
+    const requested = from ?? (this.originDocTime >= this.duration ? 0 : this.originDocTime);
+    const target = Number.isFinite(requested) ? Math.max(0, Math.min(requested, this.duration)) : 0;
     this.running = true;
-    this.originDocTime = from;
+    this.originDocTime = target;
     this.originCtxTime = ctx.currentTime;
-    this.scheduleFrom(from);
+    this.scheduleFrom(target);
     this.tick();
   }
 
   pause(): void {
-    if (!this.running) return;
-    this.originDocTime = this.time();
+    this.playbackVersion++;
+    if (this.running) this.originDocTime = this.time();
     this.running = false;
     this.stopSources();
     cancelAnimationFrame(this.raf);
+    this.events.onTime?.(this.originDocTime, this.duration);
   }
 
   async toggle(from?: number): Promise<void> {
     if (this.running) this.pause();
-    else await this.play(from ?? this.originDocTime);
+    else await this.play(from);
   }
 
   seek(t: number): void {
-    const target = Math.max(EDGE_PAD, Math.min(t, this.duration || t));
+    const target = Number.isFinite(t) ? Math.max(0, Math.min(t, this.duration)) : 0;
     if (this.running) void this.play(target);
     else this.originDocTime = target;
+    this.events.onTime?.(target, this.duration);
   }
 
   /** The sentence whose audio contains `t`, or null in a gap. */
@@ -260,18 +282,25 @@ export class Player {
     if (!ctx || !this.master) return;
     const base = this.originCtxTime;
     for (const s of this.segments) {
-      if (s.start + s.duration < t) continue;
+      if (s.start + s.duration <= t) continue;
+      if (this.sources.some((source) => source.sentenceIndex === s.sentenceIndex)) continue;
       const buffer = ctx.createBuffer(1, s.samples.length, s.sampleRate);
       buffer.getChannelData(0).set(s.samples);
       const node = ctx.createBufferSource();
       node.buffer = buffer;
       node.connect(this.master);
-      const when = base + (s.start - t);
-      // A tiny offset avoids scheduling in the past, which the Web Audio API
-      // silently turns into an immediate, unsynchronised start.
+      const when = base + (s.start - this.originDocTime);
       const at = Math.max(ctx.currentTime, when);
-      node.start(at);
-      this.sources.push({ node, startAt: s.start });
+      // Seeking inside a sentence must skip the preceding PCM, not merely move
+      // its start time. Account for scheduling work that elapsed on the clock.
+      const offset = Math.max(0, this.originDocTime + (at - base) - s.start);
+      if (offset >= s.duration) { node.disconnect(); continue; }
+      node.start(at, offset);
+      this.sources.push({ node, sentenceIndex: s.sentenceIndex });
+      node.onended = () => {
+        this.sources = this.sources.filter((source) => source.node !== node);
+        node.disconnect();
+      };
     }
   }
 
@@ -293,6 +322,8 @@ export class Player {
     const d = this.duration;
     this.events.onTime?.(t, d);
     if (d > 0 && t >= d - 0.01) {
+      this.originDocTime = d;
+      this.running = false;
       this.pause();
       this.events.onEnd?.();
       return;
@@ -304,6 +335,14 @@ export class Player {
   toExportChunks(): { chunks: Float32Array[]; sampleRate: number } {
     const sorted = [...this.segments].sort((a, b) => a.sentenceIndex - b.sentenceIndex);
     const rate = sorted[0]?.sampleRate ?? 24000;
-    return { chunks: sorted.map((s) => s.samples), sampleRate: rate };
+    if (!sorted.length) return { chunks: [], sampleRate: rate };
+    const silence = (seconds: number) => new Float32Array(Math.round(seconds * rate));
+    const chunks: Float32Array[] = [silence(EDGE_PAD)];
+    sorted.forEach((segment, index) => {
+      if (index > 0) chunks.push(silence(SENTENCE_GAP));
+      chunks.push(segment.sampleRate === rate ? segment.samples : resample(segment.samples, segment.sampleRate, rate));
+    });
+    chunks.push(silence(EDGE_PAD));
+    return { chunks, sampleRate: rate };
   }
 }

@@ -14,7 +14,8 @@ export type IconName =
   | 'prevSentence' | 'nextSentence'
   | 'prevParagraph' | 'nextParagraph'
   | 'page' | 'focus' | 'voice' | 'models' | 'library'
-  | 'mic' | 'download' | 'search' | 'check' | 'close' | 'settings' | 'bell' | 'file';
+  | 'mic' | 'download' | 'search' | 'check' | 'close' | 'settings' | 'bell' | 'file'
+  | 'plus' | 'trash' | 'history';
 
 const PATHS: Record<IconName, ReactElement> = {
   play: <path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none" />,
@@ -100,6 +101,9 @@ const PATHS: Record<IconName, ReactElement> = {
   ),
   check: <path d="m5 12.5 4.5 4.5L19 7" />,
   close: <path d="M6 6l12 12M18 6 6 18" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  trash: <><path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 10v7M14 10v7" /></>,
+  history: <><path d="M4 5v5h5M4 10a8 8 0 1 1 1.8 7.1M12 7v5l3.5 2" /></>,
   settings: (
     <>
       <circle cx="12" cy="12" r="3" />

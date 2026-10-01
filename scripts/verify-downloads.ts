@@ -1,0 +1,112 @@
+/** Run with npx tsx scripts/verify-downloads.ts. Uses real HTTP range transfers. */
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+
+// Before implementation, this assertion reports the missing feature deliberately.
+const downloads = await import('../src/core/tts/downloads').catch(() => ({}));
+assert.equal(typeof downloads.ResumableDownloader, 'function', 'resumable model downloader exists');
+const { ResumableDownloader, MODEL_VARIANTS, modelFiles, modelFileUrl, DEFAULT_MODEL_ID } = downloads;
+
+class MemoryStore {
+  files = new Map<string, any>();
+  chunks = new Map<string, Blob[]>();
+  async get(url: string) { return structuredClone(this.files.get(url)); }
+  async reset(url: string) { this.files.delete(url); this.chunks.delete(url); }
+  async append(url: string, chunk: Blob, meta: any) {
+    this.chunks.set(url, [...this.chunks.get(url) ?? [], chunk]);
+    this.files.set(url, structuredClone(meta));
+  }
+  async complete(url: string, meta: any) { this.files.set(url, structuredClone(meta)); }
+  async read(url: string) { return this.files.get(url)?.complete ? new Blob(this.chunks.get(url)) : undefined; }
+}
+
+assert.equal(DEFAULT_MODEL_ID, 'kokoro-q8');
+for (const variant of MODEL_VARIANTS) {
+  const files = modelFiles(variant.cacheId);
+  assert(files.some((file: any) => file.url === modelFileUrl(variant.file)), 'runtime and installer use the same weights URL');
+  assert(files.some((file: any) => file.file === 'tokenizer.json'), 'offline install includes tokenizer');
+  assert(files.some((file: any) => file.file === 'voices/af_bella.bin'), 'offline install includes narrator data');
+  assert.equal(new Set(files.map((file: any) => file.url)).size, files.length);
+}
+assert.throws(() => modelFiles('piper'), /unknown|supported/i, 'unsupported engines cannot silently use Kokoro');
+const { WebKokoroEngine } = await import('../src/core/tts/web');
+assert.equal(new WebKokoroEngine('kokoro-q4').id, 'kokoro-q4', 'selected model identity survives the engine boundary');
+const { availableVoices } = await import('../src/core/tts/voices');
+assert(availableVoices().every((voice: any) => downloads.SUPPORTED_VOICE_IDS.includes(voice.id)), 'every selectable narrator is supported by the installed Kokoro JS engine');
+
+const payload = new Uint8Array(96 * 1024).map((_, i) => i % 251);
+const ranges: string[] = [];
+let active = 0;
+let peak = 0;
+let requests = 0;
+const server = createServer((req, res) => {
+  requests++;
+  active++;
+  peak = Math.max(peak, active);
+  res.on('close', () => active--);
+  const range = String(req.headers.range ?? '');
+  ranges.push(range);
+  const offset = Number(/bytes=(\d+)-/.exec(range)?.[1] ?? 0);
+  const ignoreRange = req.url?.includes('ignore-range');
+  const start = ignoreRange ? 0 : offset;
+  const body = payload.subarray(start);
+  res.writeHead(start ? 206 : 200, {
+    'Content-Length': body.byteLength,
+    'Content-Type': 'application/octet-stream',
+    'ETag': '"test-version"',
+    ...(start ? { 'Content-Range': `bytes ${start}-${payload.length - 1}/${payload.length}` } : {}),
+  });
+  let position = 0;
+  const tick = () => {
+    if (res.destroyed) return;
+    if (position >= body.length) { res.end(); return; }
+    res.write(body.subarray(position, position + 8192));
+    position += 8192;
+    setTimeout(tick, 3);
+  };
+  tick();
+});
+await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+const address = server.address();
+assert(address && typeof address !== 'string');
+const base = `http://127.0.0.1:${address.port}`;
+try {
+  const store = new MemoryStore();
+  const downloader = new ResumableDownloader({ store, concurrency: 3, checkpointBytes: 8192, retryCount: 0 });
+  const controller = new AbortController();
+  await assert.rejects(downloader.download({ url: `${base}/resume`, file: 'resume', sizeBytes: payload.length }, {
+    signal: controller.signal,
+    onProgress: (progress: any) => { if (progress.loaded >= 24576) controller.abort(); },
+  }), /abort/i);
+  const partial = await store.get(`${base}/resume`);
+  assert(partial.bytes > 0 && partial.bytes < payload.length, 'interrupted transfer commits useful partial bytes');
+  assert.equal(partial.complete, false, 'partial cache never reports installed');
+  const next = new ResumableDownloader({ store, concurrency: 3, checkpointBytes: 8192, retryCount: 0 });
+  await next.download({ url: `${base}/resume`, file: 'resume', sizeBytes: payload.length });
+  assert(ranges.includes(`bytes=${partial.bytes}-`), 'new downloader resumes durable checkpoint');
+  assert.deepEqual(new Uint8Array(await (await store.read(`${base}/resume`))!.arrayBuffer()), payload);
+  const before = requests;
+  await next.download({ url: `${base}/resume`, file: 'resume', sizeBytes: payload.length });
+  assert.equal(requests, before, 'offline reuse makes no network request');
+
+  const duplicated = { url: `${base}/shared`, file: 'shared', sizeBytes: payload.length };
+  const sharedBefore = requests;
+  await Promise.all([next.download(duplicated), next.download(duplicated)]);
+  assert.equal(requests, sharedBefore + 1, 'concurrent models share common file transfers');
+  peak = 0;
+  await Promise.all(Array.from({ length: 7 }, (_, i) => next.download({ url: `${base}/parallel-${i}`, file: `${i}`, sizeBytes: payload.length })));
+  assert(peak >= 2 && peak <= 3, `controlled parallel transfers: peak ${peak}`);
+
+  const ignored = { url: `${base}/ignore-range`, file: 'ignored', sizeBytes: payload.length };
+  await store.append(ignored.url, new Blob([payload.subarray(0, 8192)]), {
+    url: ignored.url, bytes: 8192, total: payload.length, complete: false, etag: '"test-version"', headers: {},
+  });
+  await next.download(ignored);
+  assert.deepEqual(new Uint8Array(await (await store.read(ignored.url))!.arrayBuffer()), payload, 'server ignoring Range restarts cleanly without duplicate bytes');
+  await assert.rejects(next.download({ url: `${base}/wrong-size`, file: 'bad', sizeBytes: payload.length + 1 }), /size|length|incomplete/i);
+  assert.equal((await store.get(`${base}/wrong-size`))?.complete, false, 'truncated weights never become ready');
+  console.log('Model download checks passed: resume, offline reuse, deduplication, parallel limit, range fallback, size validation, catalogue paths.');
+} finally {
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}

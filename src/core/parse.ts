@@ -151,14 +151,16 @@ export function parseMarkdown(text: string, fileName: string): Doc {
       case 'space':
         break;
       case 'list': {
-        for (const item of (t.tokens ?? []) as { text?: string }[]) {
+        for (const item of (tok as { items?: { text?: string }[] }).items ?? []) {
           b.add('listItem', stripInline(item.text ?? ''));
         }
         break;
       }
       case 'table': {
-        const rows = (t as { header?: unknown[]; rows?: unknown[][] }).rows ?? [];
-        for (const row of rows) b.add('paragraph', (row as unknown[]).map(String).join('. '));
+        const table = tok as { header?: { text: string }[]; rows?: { text: string }[][] };
+        for (const row of [table.header ?? [], ...(table.rows ?? [])]) {
+          b.add('paragraph', row.map((cell) => stripInline(cell.text)).join('. '));
+        }
         break;
       }
       default:
@@ -373,6 +375,8 @@ export const UNSUPPORTED: Record<string, string> = {
 
 export async function parseDocument(fileName: string, buf: ArrayBuffer): Promise<Doc> {
   const ext = (fileName.split('.').pop() ?? '').toLowerCase();
+
+  if (buf.byteLength === 0) throw new Error('That document is empty; no readable text was found.');
 
   if (UNSUPPORTED[ext]) throw new Error(UNSUPPORTED[ext]);
 
