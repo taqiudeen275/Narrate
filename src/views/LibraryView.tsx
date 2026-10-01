@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useNarrate } from '../state/store';
 import { Icon } from '../design/Icon';
 
@@ -6,7 +7,11 @@ const ACCEPT = '.md,.markdown,.txt,.pdf,.docx,.epub,.rtf,.html,.htm,.xhtml';
 const addedDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
 
 export function LibraryView() {
-  const { library, activeDocId, openBuffer, openLibraryDoc, removeDoc, setView, busy, status } = useNarrate();
+  const { library, activeDocId, openBuffer, openLibraryDoc, openSample, removeDoc, setView, busy, status } = useNarrate(useShallow(state => ({
+    library: state.library, activeDocId: state.activeDocId, openBuffer: state.openBuffer,
+    openLibraryDoc: state.openLibraryDoc, openSample: state.openSample, removeDoc: state.removeDoc,
+    setView: state.setView, busy: state.busy, status: state.status,
+  })));
   const [drag, setDrag] = useState(false);
   const [pasted, setPasted] = useState('');
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -45,6 +50,14 @@ export function LibraryView() {
       await openLibraryDoc(id);
       if (useNarrate.getState().activeDocId === id) setView('player');
     } finally { setOpening(null); }
+  };
+
+  const takeSample = async () => {
+    if (busy || opening) return;
+    setOpening('Narrate sample');
+    try { if (await openSample()) setView('player'); }
+    catch (error) { setFileError(error instanceof Error ? error.message : 'Could not open the sample. Try again.'); }
+    finally { setOpening(null); }
   };
 
   const filtered = library.filter((entry) => `${entry.title} ${entry.sourceName}`.toLocaleLowerCase().includes(query.toLocaleLowerCase().trim()));
@@ -88,7 +101,7 @@ export function LibraryView() {
         {library.length ? <label className="n-searchwrap n-lib-search"><Icon name="search" size={17} /><input type="search" className="input" placeholder="Find a document" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search Library" /></label> : null}
       </div>
 
-      {!library.length ? <div className="n-lib-empty"><Icon name="library" size={34} /><h3>One document is a good beginning.</h3><p>Add a file or paste some text. Your Library and saved audio will be here when you come back.</p></div> : !filtered.length ? <div className="n-lib-empty"><h3>No documents match “{query}”.</h3><button type="button" className="pill" onClick={() => setQuery('')}>Clear search</button></div> : <div className="n-libgrid">
+      {!library.length ? <div className="n-lib-empty"><Icon name="library" size={34} /><h3>One document is a good beginning.</h3><p>Add a file or paste some text. Your Library and saved audio will be here when you come back.</p><button type="button" className="pill" disabled={busy || !!opening} onClick={() => void takeSample()}><Icon name="page" size={16} />Try the sample</button></div> : !filtered.length ? <div className="n-lib-empty"><h3>No documents match “{query}”.</h3><button type="button" className="pill" onClick={() => setQuery('')}>Clear search</button></div> : <div className="n-libgrid">
         {filtered.map((entry) => {
           const active = entry.id === activeDocId;
           const progress = Math.min(100, Math.round(entry.renderedCount / Math.max(1, entry.totalSentences) * 100));

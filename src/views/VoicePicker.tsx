@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useNarrate } from '../state/store';
 import { VoiceAvatar } from '../design/VoiceAvatar';
 import { Icon } from '../design/Icon';
@@ -17,7 +18,8 @@ import { useAudition } from '../components/useAudition';
 export function VoicePicker({ onPickVoice }: { onPickVoice?: () => void }) {
   const {
     voiceId, setVoice, engine, engineReady, ensureEngine, busy,
-  } = useNarrate();
+  } = useNarrate(useShallow(state => ({ voiceId: state.voiceId, setVoice: state.setVoice,
+    engine: state.engine, engineReady: state.engineReady, ensureEngine: state.ensureEngine, busy: state.busy })));
   const [accent, setAccent] = useState('All');
   const [query, setQuery] = useState('');
   const { audition, error } = useAudition(engine, ensureEngine);

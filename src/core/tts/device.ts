@@ -53,6 +53,31 @@ export function recommendModel(hints: DeviceHints, observed: Measurements) {
       : 'Start with the smallest supported edition for efficient rendering. Measured generation speed will refine this recommendation.';
   return { modelId, realtimeFactor, mode, reason, measured: !!fastest };
 }
+
+/** Advice is optional: hardware reports never hide or block a supported model. */
+export function modelDownloadWarning(modelId: string, hints: DeviceHints, observed: Measurements): { title: string; reason: string } | null {
+  const model = MODEL_VARIANTS.find(edition => edition.cacheId === modelId);
+  if (!model) return null;
+  const workingMemoryGB = model.sizeBytes * 4 / 1024 ** 3 + 0.5;
+  if (hints.memoryGB !== null && workingMemoryGB > hints.memoryGB * 0.5) {
+    return { title: 'This edition may need too much memory',
+      reason: `The reported ${hints.memoryGB} GB of memory leaves limited headroom for this edition and your document. Generation may be slow or stop if memory runs out. This is an estimate; you can still try it.` };
+  }
+  const sample = observed[modelId];
+  const factor = validMeasurement(sample) && sample.count >= 3 && sample.audioSeconds >= 3
+    ? sample.elapsedMs / 1000 / sample.audioSeconds : null;
+  if (factor !== null && factor > 1) {
+    return { title: 'This edition generates slower than playback',
+      reason: `On this device, 10 minutes of audio took about ${Math.max(1, Math.round(factor * 10))} minutes to generate at normal pace, excluding model loading. Use Render all before listening to avoid pauses. Speed can change with temperature and other apps.` };
+  }
+  if (modelId !== DEFAULT_MODEL_ID && modelId !== recommendModel(hints, observed).modelId) {
+    return { title: 'Try a larger edition?',
+      reason: hints.memoryGB === null
+        ? 'Memory reporting is unavailable on this device. This edition has a larger download and needs more memory than Balanced; rendering may take longer or run out of memory. You can still download and compare it.'
+        : 'This edition has a larger download and needs more memory than Balanced. Rendering may take longer even on a powerful phone; generate a few sentences to measure it on your device. You can still download and compare it.' };
+  }
+  return null;
+}
 export function deviceMeasurements() { return measurements; }
 export function subscribeDeviceMeasurements(listener: () => void) {
   observers.add(listener);

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useNarrate } from '../state/store';
 import { Icon } from '../design/Icon';
 import { VoiceAvatar } from '../design/VoiceAvatar';
@@ -13,15 +14,18 @@ import { useAudition } from '../components/useAudition';
  * Naming and casting is finished and works now: every voice has a name and a
  * generated avatar, and you can hear any of them before choosing.
  *
- * Cloning is not finished. Kokoro ships 54 fixed voices and has no cloning
- * capability at all; the only CPU-viable cloner is Pocket TTS, which needs the
- * native build. So the cloning controls below are present and explain exactly
+ * Cloning is not finished. This Kokoro build has fixed preset voices and no
+ * cloning adapter. Pocket TTS is a possible additional engine, not an installed
+ * capability. The cloning controls below explain exactly
  * what is missing, rather than being hidden or — worse — wired to something
  * that quietly does not clone. A voice that pretends to be a person is a worse
  * bug than a missing feature.
  */
 export function VoiceLab() {
-  const { setView, voiceId, setVoice, ensureEngine, engineReady, engine, busy } = useNarrate();
+  const { setView, voiceId, setVoice, ensureEngine, engineReady, engine, busy } = useNarrate(useShallow(state => ({
+    setView: state.setView, voiceId: state.voiceId, setVoice: state.setVoice, ensureEngine: state.ensureEngine,
+    engineReady: state.engineReady, engine: state.engine, busy: state.busy,
+  })));
   const [name, setName] = useState('');
   const [reference, setReference] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +38,7 @@ export function VoiceLab() {
       return;
     }
     setError(
-      'Voice cloning is not available yet. It needs the Pocket TTS engine, which is waiting on the native build. See the Models page.',
+      'Voice cloning needs an additional model engine that is not implemented in this build. The built-in narrators below are available now.',
     );
   };
 
@@ -47,9 +51,8 @@ export function VoiceLab() {
           <div className="label">Voice lab</div>
           <h1 className="heading n-panel-title">Create a voice</h1>
           <p className="n-panel-sub">
-            Cloning your own voice needs an engine Narrate does not have installed yet.
-            This page is honest about that. The casting half — hearing and choosing
-            the built-in narrators — works now.
+            Hear and choose the built-in narrators. Voice cloning needs an additional
+            model engine and is not available in this build.
           </p>
         </div>
         <button type="button" className="pill" onClick={() => setView('player')}>Done</button>
@@ -100,10 +103,9 @@ export function VoiceLab() {
           {error || auditionError ? <p className="n-error" role="alert">{auditionError ?? error}</p> : null}
 
           <div className="n-notice">
-            <strong>What is missing.</strong> Kokoro — the engine currently in use — has no
-            cloning capability; its 54 voices are fixed. Cloning needs Pocket TTS, which is a
-            100M-parameter model reached through a llama.cpp runtime. That build is waiting on
-            a C++ toolchain, and the native model adapter is the next piece of work.
+            <strong>Voice cloning is planned.</strong> This Kokoro build supports {KOKORO_VOICES.length} preset
+            narrators. Engines such as Pocket TTS can create a voice from a reference recording,
+            but Narrate still needs an adapter and compatible model files to support that.
           </div>
         </div>
       </section>

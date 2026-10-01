@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { Block, Doc, Word } from '../core/types';
+import { wordAtTime } from '../core/types';
 import { useNarrate } from '../state/store';
+import { prefersReducedMotion } from '../core/motion';
 
 type Token =
   | { t: 'text'; v: string }
@@ -51,13 +54,26 @@ function tokensOfSentence(doc: Doc, sentenceIndex: number): Token[] {
 
 export function ReaderView() {
   const {
-    doc, activeDocId, time, playing, currentSentence, readerMode, setReaderMode,
+    doc, activeDocId, playing, currentSentence, currentWord, wordPhase, readerMode, setReaderMode,
     seekWord, setView,
-  } = useNarrate();
+  } = useNarrate(useShallow((state) => {
+    // Timeline resets can precede the next playback callback. Resolve the word
+    // from the timeline so a stale callback position cannot leave spent text.
+    const currentWord = state.doc ? wordAtTime(state.doc, state.time) : null;
+    return {
+    doc: state.doc, activeDocId: state.activeDocId, playing: state.playing,
+    currentSentence: state.currentSentence, currentWord,
+    wordPhase: !currentWord || state.time < (currentWord.startTime ?? 0) ? 'ahead'
+      : currentWord.endTime !== null && state.time >= currentWord.endTime ? 'spent' : 'now',
+    readerMode: state.readerMode, setReaderMode: state.setReaderMode,
+    seekWord: state.seekWord, setView: state.setView,
+    };
+  }));
 
   const sentenceRefs = useRef(new Map<number, HTMLElement>());
   const scrollRef = useRef<HTMLDivElement>(null);
-  const following = useRef(true);
+  const wordRef = useRef<HTMLElement | null>(null);
+  const [following, setFollowing] = useState(true);
   const isFocus = readerMode === 'focus';
 
   const tokensByBlock = useMemo(() => {
@@ -81,7 +97,7 @@ export function ReaderView() {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const onScroll = () => { following.current = false; };
+    const onScroll = () => { setFollowing(false); };
     el.addEventListener('wheel', onScroll, { passive: true });
     el.addEventListener('touchmove', onScroll, { passive: true });
     return () => {
@@ -90,17 +106,22 @@ export function ReaderView() {
     };
   }, [isFocus]);
 
-  useEffect(() => { following.current = true; }, [activeDocId, isFocus]);
+  useEffect(() => { setFollowing(true); }, [activeDocId, isFocus]);
 
   useEffect(() => {
-    if (!following.current || !playing || !currentSentence || isFocus) return;
-    const el = sentenceRefs.current.get(currentSentence.index);
-    if (!el) return;
-    if (el.getBoundingClientRect().top < 90 ||
-        el.getBoundingClientRect().bottom > window.innerHeight - 190) {
-      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (!following || !playing || !currentSentence) return;
+    const el = wordRef.current ?? sentenceRefs.current.get(currentSentence.index);
+    const page = scrollRef.current;
+    if (!el || !page) return;
+    const wordBounds = el.getBoundingClientRect();
+    const pageBounds = page.getBoundingClientRect();
+    if (wordBounds.top < pageBounds.top + 16 || wordBounds.bottom > pageBounds.bottom - 16) {
+      // Follow vertically inside the reading pane. scrollIntoView also moves
+      // horizontal ancestors, which can leave the entire phone UI off screen.
+      page.scrollTo({ top: Math.max(0, page.scrollTop + wordBounds.top - pageBounds.top - (page.clientHeight - wordBounds.height) / 2),
+        behavior: prefersReducedMotion() ? 'instant' : 'smooth' });
     }
-  }, [currentSentence?.index, playing, isFocus]);
+  }, [currentWord?.index, currentSentence?.index, playing, isFocus, following]);
 
   if (!doc) {
     return (
@@ -109,7 +130,7 @@ export function ReaderView() {
         <p className="n-empty-body">
           Open a file, or start with the sample, and the text here will move with the voice.
         </p>
-        <button type="button" className="btn btn-primary" onClick={() => setView('player')}>
+        <button type="button" className="btn btn-primary" onClick={() => setView('library')}>
           Go to library
         </button>
       </div>
@@ -118,8 +139,8 @@ export function ReaderView() {
 
   const wordState = (w: Word): string => {
     if (w.endTime === null) return 'n-w-ahead';
-    if (time >= w.endTime) return 'n-w-spent';
-    if (time >= (w.startTime ?? 0)) return 'n-w-now';
+    if (currentWord && w.index < currentWord.index) return 'n-w-spent';
+    if (w.index === currentWord?.index) return `n-w-${wordPhase}`;
     return 'n-w-ahead';
   };
 
@@ -140,13 +161,14 @@ export function ReaderView() {
               .filter(Boolean)
               .join(' ')}
             ref={(el) => {
+              if (w.index === currentWord?.index) wordRef.current = el;
               if (w.index !== doc.sentences[w.sentenceIndex].wordStart) return;
               if (el) sentenceRefs.current.set(w.sentenceIndex, el);
               else sentenceRefs.current.delete(w.sentenceIndex);
             }}
             onClick={(event) => {
               event.stopPropagation();
-              following.current = true;
+              setFollowing(true);
               void seekWord(w.index);
             }}
             role="button"
@@ -155,7 +177,7 @@ export function ReaderView() {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 e.stopPropagation();
-                following.current = true;
+                setFollowing(true);
                 void seekWord(w.index);
               }
             }}
@@ -179,7 +201,7 @@ export function ReaderView() {
         {/* The mode switch lives in both modes. Omitting it here is what made
             focus mode a one-way door. */}
         <div className="n-page-toolbar">
-          <div className="label">Focus</div>
+          {following ? <div className="label">Focus</div> : <button type="button" className="n-reader-follow" onClick={() => setFollowing(true)}>Resume follow</button>}
           <div className="n-segment" role="group" aria-label="Reading mode">
             <button
               type="button"
@@ -200,7 +222,7 @@ export function ReaderView() {
           </div>
         </div>
 
-        <div className="n-focus-stage">
+        <div className="n-focus-stage" ref={scrollRef}>
           <div className="n-focus-stack">
             {window_.map((i) => {
               const s = doc.sentences[i];
@@ -229,7 +251,7 @@ export function ReaderView() {
   return (
     <div className="n-reader n-reader-page">
       <div className="n-page-toolbar">
-        <div className="label">Reading</div>
+        {following ? <div className="label">Reading</div> : <button type="button" className="n-reader-follow" onClick={() => setFollowing(true)}>Resume follow</button>}
         <div className="n-segment" role="group" aria-label="Reading mode">
           <button
             type="button"
@@ -261,7 +283,7 @@ export function ReaderView() {
             ) : block.kind === 'listItem' ? (
               <p className="n-li">
                 <span className="n-li-mark" aria-hidden="true" />
-                {renderTokens(tokensByBlock[bi])}
+                <span className="n-li-text">{renderTokens(tokensByBlock[bi])}</span>
               </p>
             ) : block.kind === 'quote' ? (
               <blockquote className="n-quote">{renderTokens(tokensByBlock[bi])}</blockquote>

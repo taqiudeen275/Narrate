@@ -1,4 +1,6 @@
-import { useId } from 'react';
+import { useId, useMemo } from 'react';
+
+const EMPTY_PEAKS: readonly number[] = [];
 
 /** Sample a bounded number of points per bin, so a book never scans millions of samples on a UI update. */
 export function audioPeaks(chunks: readonly Float32Array[], bins = 96): number[] {
@@ -10,7 +12,8 @@ export function audioPeaks(chunks: readonly Float32Array[], bins = 96): number[]
     const stride = Math.max(1, Math.floor(total / (bins * 96)));
     for (let index = 0; index < chunk.length; index += stride) {
       const bin = Math.min(bins - 1, Math.floor((offset + index) / total * bins));
-      peaks[bin] = Math.max(peaks[bin], Math.abs(chunk[index]));
+      const amplitude = Math.abs(chunk[index]);
+      if (Number.isFinite(amplitude)) peaks[bin] = Math.max(peaks[bin], amplitude);
     }
     offset += chunk.length;
   }
@@ -20,7 +23,7 @@ export function audioPeaks(chunks: readonly Float32Array[], bins = 96): number[]
 
 /** Thin vertical marks, measured from saved audio. Before generation they remain a quiet baseline. */
 export function LineWave({ height = 72, progress = 0, live = false, busy = false,
-  peaks = [], className, label }: {
+  peaks = EMPTY_PEAKS, className, label }: {
   height?: number;
   progress?: number;
   live?: boolean;
@@ -33,17 +36,19 @@ export function LineWave({ height = 72, progress = 0, live = false, busy = false
   const fraction = Math.max(0, Math.min(1, progress));
   const count = peaks.length || 96;
   const width = 1000;
+  const marks = useMemo(() => Array.from({ length: count }, (_, index) => {
+    const value = peaks[index];
+    const half = (value != null && Number.isFinite(value) ? Math.max(0.035, Math.min(1, value)) : 0.035) * 43;
+    const x = (index + 0.5) / count * width;
+    return <line key={index} className="n-wave-mark" x1={x} x2={x} y1={50 - half} y2={50 + half} vectorEffect="non-scaling-stroke" style={{ animationDelay: `${(index % 16) * -0.09}s` }} />;
+  }), [count, peaks]);
   return (
     <svg className={`n-line n-wave-bars${busy ? ' n-wave-bars-busy' : ''}${live ? ' n-wave-bars-live' : ''}${peaks.length ? '' : ' n-wave-bars-empty'}${className ? ` ${className}` : ''}`}
       viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" style={{ blockSize: height }}
       role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true} focusable="false">
-      <defs><linearGradient id={`${id}-g`} x1="0" x2="1" y1="0" y2="0"><stop offset={`${fraction * 100}%`} stopColor="var(--accent)" /><stop offset={`${fraction * 100}%`} stopColor="var(--wave-ahead)" /><stop offset="100%" stopColor="var(--wave-ahead)" /></linearGradient></defs>
+      <defs><linearGradient id={`${id}-g`} gradientUnits="userSpaceOnUse" x1="0" x2={width} y1="0" y2="0"><stop offset={`${fraction * 100}%`} stopColor="var(--accent)" /><stop offset={`${fraction * 100}%`} stopColor="var(--wave-ahead)" /><stop offset="100%" stopColor="var(--wave-ahead)" /></linearGradient></defs>
       <g stroke={`url(#${id}-g)`} strokeWidth={2.8} strokeLinecap="round">
-        {Array.from({ length: count }, (_, index) => {
-          const half = (peaks[index] ?? 0.035) * 43;
-          const x = (index + 0.5) / count * width;
-          return <line key={index} className="n-wave-mark" x1={x} x2={x} y1={50 - half} y2={50 + half} vectorEffect="non-scaling-stroke" style={{ animationDelay: `${(index % 16) * -0.09}s` }} />;
-        })}
+        {marks}
       </g>
       {fraction > 0 && peaks.length ? <line x1={fraction * width} x2={fraction * width} y1="3" y2="97" stroke="var(--accent)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" /> : null}
     </svg>

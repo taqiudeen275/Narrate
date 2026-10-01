@@ -1,22 +1,32 @@
 /** Exercise React event handlers in a local DOM, without launching a browser. */
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
-import { act, createElement } from 'react';
+import { act, createElement, Profiler } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useNarrate } from '../src/state/store';
 import { DocBuilder } from '../src/core/parse';
+import { distributeSentence, wordAtTime } from '../src/core/types';
 import { ReaderView } from '../src/views/ReaderView';
 import { VoicePicker } from '../src/views/VoicePicker';
 import { VoiceSheet } from '../src/components/VoiceSheet';
 import { VoiceLab } from '../src/views/VoiceLab';
 import { LibraryView } from '../src/views/LibraryView';
+import { PlayerView } from '../src/views/PlayerView';
 
 const { window } = parseHTML('<html><body><div id="test"></div></body></html>');
 Object.assign(globalThis, { window, document: window.document, HTMLElement: window.HTMLElement,
   IS_REACT_ACT_ENVIRONMENT: true });
-let scrolled: string[] = [];
-window.HTMLElement.prototype.getBoundingClientRect = () => ({ top: 1000, bottom: 1050 } as DOMRect);
-window.HTMLElement.prototype.scrollIntoView = function () { scrolled.push(this.textContent ?? ''); };
+let scrolled: ScrollToOptions[] = [];
+let scrollBehavior: ScrollBehavior | undefined;
+window.HTMLElement.prototype.getBoundingClientRect = function () { return (this.tagName === 'ARTICLE' || this.classList.contains('n-focus-stage') ? { top: 100, bottom: 600, height: 500 } : { top: 1000, bottom: 1050, height: 50 }) as DOMRect; };
+window.HTMLElement.prototype.scrollIntoView = () => { throw new Error('following must not scroll the viewport or horizontal ancestors'); };
+window.HTMLElement.prototype.scrollTo = function (options?: ScrollToOptions | number) {
+  assert.ok(this.tagName === 'ARTICLE' || this.classList.contains('n-focus-stage'), 'only the active reading pane may scroll');
+  assert.equal(typeof options, 'object');
+  scrolled.push(options as ScrollToOptions); scrollBehavior = (options as ScrollToOptions).behavior;
+};
+Object.defineProperty(window.HTMLElement.prototype, 'clientHeight', { get: () => 500, configurable: true });
+Object.defineProperty(window.HTMLElement.prototype, 'scrollTop', { get: () => 0, configurable: true });
 Object.defineProperty(window, 'innerHeight', { value: 800 });
 const root = createRoot(window.document.getElementById('test')!);
 const render = async (view: React.ReactNode) => { await act(async () => { root.render(view); }); };
@@ -40,17 +50,110 @@ await check('Reader follows a later sentence within the same paragraph', async (
   await render(createElement(ReaderView)); scrolled = [];
   await act(async () => { useNarrate.setState({ playing: true, currentSentence: doc.sentences[1] }); });
   assert.equal(scrolled.length, 1);
-  assert.match(scrolled[0], /Second/);
+  assert.equal(scrolled[0].top, 675);
+  assert.equal(scrolled[0].left, undefined, 'following must leave horizontal positioning unchanged');
 });
 await check('Reader respects manual scrolling and attaches scroll listeners after Focus', async () => {
   useNarrate.setState({ doc, readerMode: 'focus', playing: true, currentSentence: doc.sentences[0] });
   await render(createElement(ReaderView));
   await act(async () => { useNarrate.setState({ readerMode: 'page' }); });
   scrolled = [];
-  window.document.querySelector('article')!.dispatchEvent(new window.Event('wheel'));
+  await act(async () => window.document.querySelector('article')!.dispatchEvent(new window.Event('wheel')));
   await act(async () => { useNarrate.setState({ currentSentence: doc.sentences[2] }); });
   assert.equal(scrolled.length, 0, 'manual scrolling must suppress automatic recentering');
+  await click(window.document.querySelector('.n-reader-follow'));
+  assert.equal(scrolled.length, 1, 'Resume follow must bring the narration back into view');
 });
+await check('Reader following respects Android reduced motion', async () => {
+  window.document.documentElement.dataset.reduceMotion = 'true';
+  useNarrate.setState({ doc, activeDocId: 'reduced-reader', readerMode: 'page', playing: false, currentSentence: doc.sentences[0] });
+  await render(createElement(ReaderView));
+  await act(async () => useNarrate.setState({ playing: true, currentSentence: doc.sentences[1] }));
+  assert.equal(scrollBehavior, 'instant', 'automatic following must not force smooth scrolling when animations are removed');
+  delete window.document.documentElement.dataset.reduceMotion;
+});
+await check('Reader list prose wraps in one flex child', async () => {
+  const list = new DocBuilder(); list.add('listItem', 'A long list item keeps all its words together and wraps on a phone.');
+  useNarrate.setState({ doc: list.build('List'), playing: false, currentSentence: null, currentWord: null, readerMode: 'page' });
+  await render(createElement(ReaderView));
+  assert.equal(window.document.querySelector('.n-li')!.children.length, 2, 'bullet and prose must be the only flex children');
+  assert.match(window.document.querySelector('.n-li-text')!.textContent ?? '', /wraps on a phone/);
+});
+await check('Both reading modes remain reachable and following advances within a long sentence', async () => {
+  const text = new DocBuilder(); text.add('paragraph', 'First second third fourth fifth sixth.');
+  const indexed = text.build('Long sentence'); distributeSentence(indexed, 0, 1, 7);
+  useNarrate.setState({ doc: indexed, time: 1.01, activeDocId: 'mode-test', readerMode: 'page', playing: false,
+    currentSentence: indexed.sentences[0], setReaderMode: mode => useNarrate.setState({ readerMode: mode }) });
+  await render(createElement(ReaderView));
+  await click(window.document.querySelector('[aria-label="Reading mode"] button:last-child'));
+  assert.ok(window.document.querySelector('.n-reader-focus'));
+  assert.equal(window.document.querySelectorAll('[aria-label="Reading mode"] button').length, 2);
+  await click(window.document.querySelector('[aria-label="Reading mode"] button:first-child'));
+  assert.ok(window.document.querySelector('article'));
+  await act(async () => useNarrate.setState({ playing: true })); scrolled = [];
+  await act(async () => useNarrate.setState({ time: indexed.words[4].startTime! + 0.01 }));
+  assert.equal(scrolled.length, 1, 'the next offscreen word must be followed even before the sentence changes');
+  assert.equal(scrolled[0].left, undefined);
+});
+await check('Reader updates at word boundaries, without rerendering every audio tick', async () => {
+  const timed = new DocBuilder(); timed.add('paragraph', 'First second.');
+  const indexed = timed.build('Timing'); distributeSentence(indexed, 0, 1, 2);
+  const first = indexed.words[0]; const second = indexed.words[1];
+  let commits = 0;
+  useNarrate.setState({ doc: indexed, time: first.startTime! + 0.01, currentWord: first,
+    currentSentence: indexed.sentences[0], readerMode: 'page', playing: false });
+  await render(createElement(Profiler, { id: 'reader', onRender: () => { commits++; } }, createElement(ReaderView)));
+  const mounted = commits;
+  for (const time of [first.startTime! + 0.02, first.startTime! + 0.03, first.startTime! + 0.04]) {
+    await act(async () => useNarrate.setState({ time, currentWord: wordAtTime(indexed, time) }));
+  }
+  assert.equal(commits, mounted, 'audio frames within one word must not rerender the whole document');
+  assert.equal(window.document.querySelector('.n-w-now')?.textContent, 'First');
+  await act(async () => useNarrate.setState({ time: second.startTime! + 0.01, currentWord: second }));
+  assert.equal(window.document.querySelector('.n-w-now')?.textContent, 'second');
+  await act(async () => useNarrate.setState({ time: second.endTime! + 0.01, currentWord: second }));
+  assert.equal(window.document.querySelector('.n-w-now'), null, 'a sentence pause must not leave a word highlighted');
+  await act(async () => useNarrate.setState({ time: 0 }));
+  assert.equal(window.document.querySelector('.n-w-spent'), null, 'a reset timeline must not retain spent words from the last position');
+  assert.equal(window.document.querySelector('.n-w-now'), null, 'leading silence must not highlight the first word early');
+});
+await check('Listen keeps the current sentence visible during streaming and exposes saved progress', async () => {
+  let cancelled = false;
+  useNarrate.setState({ doc, currentSentence: doc.sentences[1], renderedCount: 1, busy: true, engineLoading: false,
+    duration: 2, status: 'Paused · rendering continues', generateMode: 'stream', cancel: () => { cancelled = true; } });
+  await render(createElement(PlayerView));
+  assert.match(window.document.querySelector('.n-caption')!.textContent ?? '', /Second sentence/);
+  assert.match(window.document.querySelector('.n-player-generation')!.textContent ?? '', /Paused · rendering continues/);
+  assert.match(window.document.querySelector('.n-player-generation-foot')!.textContent ?? '', /1 of 4 sentences saved/);
+  assert.equal(window.document.querySelector('[aria-label="Generating audio"]')!.getAttribute('aria-valuenow'), '25');
+  assert.match(window.document.querySelector('.n-player-voice')!.textContent ?? '', /Change narrator/);
+  await click(window.document.querySelector('.n-player-generation-foot button'));
+  assert.equal(cancelled, true);
+});
+await check('Listen prepares full documents, then offers both exports when audio is complete', async () => {
+  const exports: string[] = [];
+  useNarrate.setState({ doc, currentSentence: null, renderedCount: 0, busy: true, engineLoading: false,
+    duration: 0, generateMode: 'full', cancel: null, exportAudio: async format => { exports.push(format); } });
+  await render(createElement(PlayerView));
+  assert.match(window.document.querySelector('.n-caption')!.textContent ?? '', /Preparing the document/);
+  await act(async () => useNarrate.setState({ busy: false, renderedCount: doc.sentences.length, duration: 10 }));
+  assert.equal(window.document.querySelector('.n-player-generation'), null);
+  assert.match(window.document.querySelector('.n-caption')!.textContent ?? '', /saved audio is ready/);
+  const actions = Array.from(window.document.querySelectorAll('.n-player-actions button'));
+  await click(actions.find(button => button.textContent === 'WAV') ?? null);
+  await click(actions.find(button => button.textContent === 'MP3') ?? null);
+  assert.deepEqual(exports, ['wav', 'mp3']);
+});
+for (const [name, component] of [['Library', createElement(LibraryView)], ['VoicePicker', createElement(VoicePicker)],
+  ['VoiceLab', createElement(VoiceLab)], ['VoiceSheet', createElement(VoiceSheet, { onClose() {} })]] as const) {
+  await check(`${name} does not rerender its full list on playback frames`, async () => {
+    let commits = 0;
+    await render(createElement(Profiler, { id: name, onRender: () => { commits++; } }, component));
+    const mounted = commits;
+    for (const time of [30.1, 30.2, 30.3]) await act(async () => useNarrate.setState({ time }));
+    assert.equal(commits, mounted, 'background playback must not rebuild static lists on every frame');
+  });
+}
 await check('Library awaits file bytes before importing the actual filename and ArrayBuffer', async () => {
   let release!: (buffer: ArrayBuffer) => void;
   const pendingBytes = new Promise<ArrayBuffer>(resolve => { release = resolve; });

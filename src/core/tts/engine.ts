@@ -14,6 +14,8 @@
  * measured pause between them.
  */
 
+import type { KokoroRuntimeInfo } from './worker-types';
+
 export interface VoiceInfo {
   id: string;
   name: string;
@@ -51,6 +53,8 @@ export interface TtsEngine {
   readonly name: string;
   /** True once weights are resident and synthesis will not re-download. */
   readonly ready: boolean;
+  /** Available after initialization, if the engine reports its execution path. */
+  readonly runtime?: KokoroRuntimeInfo | null;
 
   load(onProgress?: (p: ModelLoadProgress) => void): Promise<void>;
   synthesize(text: string, voiceId: string, opts?: SynthesisOptions): Promise<EngineChunk>;

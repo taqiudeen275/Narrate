@@ -4,7 +4,7 @@
 .n-settings-head .n-panel-title { margin-block-start: 0; }
 .n-settings-tabs { display: flex; gap: var(--s-2); margin-block-start: var(--s-4); }
 .n-settings-content { display: flex; flex: 1; min-block-size: 0; }
-.n-settings-content > .n-panel-view { padding-block-start: 0; }
+.n-settings-content .n-panel-view { padding-block-start: 0; }
 .n-settings-content .n-panel-title { font-size: var(--t-xl); font-weight: 500; }
 .n-settings-content .n-panel-head .label { display: none; }
 .n-work-count { color: var(--ink-2); font-size: var(--t-xs); white-space: nowrap; }
@@ -46,6 +46,7 @@
 .n-model-list { display: grid; gap: 18px; }
 .n-device-advice { padding: clamp(20px, 3vw, 30px); margin-block-end: 24px; border-radius: 24px; background: color-mix(in srgb, var(--accent) 7%, var(--glass-strong)); }
 .n-device-advice h3 { font-size: 24px; font-weight: 400; margin: 10px 0; }
+.n-device-advice .n-device-recommended { font-size: var(--t-lg); font-weight: 500; color: var(--accent); margin: var(--s-2) 0; }
 .n-device-advice p { max-inline-size: 66ch; font-size: 14px; line-height: 1.7; color: var(--ink-2); }
 .n-device-facts { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 12px; color: var(--ink-2); }
 .n-device-advice .n-device-speed { margin-block-end: 0; }
@@ -60,4 +61,14 @@
 .n-model-transfer { font-size: 12px; }
 .n-model-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .n-model-note { margin-block-start: 24px; max-inline-size: 66ch; }
+.n-model-performance { margin-block: var(--s-4) var(--s-5); max-inline-size: 66ch; color: var(--ink-2); font-size: var(--t-xs); line-height: 1.7; }
+.n-model-performance summary { cursor: pointer; color: var(--accent); font-weight: 500; padding-block: var(--s-2); }
+.n-model-performance p { margin: var(--s-2) 0; }
+.n-model-catalog-head { margin-block-end: var(--s-4); }
+.n-model-catalog-head h3 { margin: 0; font-size: var(--t-lg); font-weight: 500; }
+.n-model-catalog-head p { margin: var(--s-1) 0 0; font-size: var(--t-xs); line-height: 1.65; color: var(--ink-2); }
+.n-model-warning { margin-block-start: var(--s-4); padding: var(--s-4); background: rgb(226 112 58 / 0.1); border-radius: var(--r-md); }
+.n-model-warning h4 { margin: 0 0 var(--s-2); font-size: var(--t-sm); font-weight: 500; }
+.n-model-warning p { margin: 0; font-size: var(--t-xs); line-height: 1.7; color: var(--ink-2); }
+.n-model-warning .n-model-actions { margin-block-start: var(--s-3); }
 @media (max-width: 480px) { .n-model-top { flex-direction: column; } .n-model-top h3 { font-size: 18px; } .n-model-actions .pill { min-block-size: 44px; } }

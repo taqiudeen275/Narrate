@@ -8,7 +8,7 @@ import type { ModelLoadProgress, TtsEngine } from '../core/tts/engine';
 import { EDGE_PAD, SENTENCE_GAP } from '../core/tts/engine';
 import { WebKokoroEngine } from '../core/tts/web';
 import { DEFAULT_VOICE_ID, voiceById } from '../core/tts/voices';
-import { MODEL_VARIANTS } from '../core/tts/downloads';
+import { DEFAULT_MODEL_ID, MODEL_VARIANTS } from '../core/tts/downloads';
 import { beginBackgroundWork, endBackgroundWork } from '../core/background';
 import { loadDeviceMeasurements, recordGenerationMeasurement } from '../core/tts/device';
 import { SAMPLE_DOC } from './sample';
@@ -35,6 +35,7 @@ interface State {
   engineLoading: boolean;
   modelProgress: ModelLoadProgress | null;
   engineError: string | null;
+  /** Playback intent stays active while a stream waits for more audio. */
   playing: boolean;
   time: number;
   duration: number;
@@ -53,7 +54,7 @@ interface Actions {
   hydrate: () => Promise<void>;
   openBuffer: (name: string, buf: ArrayBuffer) => Promise<boolean>;
   openLibraryDoc: (id: string) => Promise<void>;
-  openSample: () => void;
+  openSample: () => Promise<boolean>;
   removeDoc: (id: string) => Promise<void>;
   setView: (v: MainView) => void;
   setReaderMode: (m: ReaderMode) => void;
@@ -126,13 +127,48 @@ export const useNarrate = create<State & Actions>((set, get) => {
     const sentence = word ? doc.sentences[word.sentenceIndex] : null;
     set({ time, duration, currentWord: word, currentSentence: sentence, targetSentence: sentence?.index ?? 0 });
   };
+  const saveAndOpenDocument = async (doc: Doc, epoch: number): Promise<boolean> => {
+    const id = freshId(); await storage.saveDocument(id, doc);
+    if (epoch !== selectionEpoch) return false;
+    const library = [entryFor(doc, id), ...get().library];
+    set({ library });
+    await storage.saveLibrary(library);
+    if (epoch !== selectionEpoch) return false;
+    get().player.setTimeline([]);
+    set({ doc, activeDocId: id, busy: false, status: 'Ready', playing: false,
+      time: 0, duration: 0, renderedCount: 0, currentWord: null, currentSentence: null, targetSentence: 0 });
+    return true;
+  };
+  const startPlayback = async (run: Run) => {
+    const player = get().player;
+    if (!current(run) || !run.playRequested || player.isRunning) return;
+    if (run.seekTarget !== null && !player.hasSentence(run.seekTarget)) {
+      run.waiting = true;
+      set({ playing: true, status: 'Preparing audio for that word' });
+      return;
+    }
+    const seek = run.seekWordIndex === null ? null : run.doc.words[run.seekWordIndex]?.startTime;
+    const requested = seek ?? run.from;
+    const from = player.renderedCount === run.doc.sentences.length && requested >= player.duration ? 0 : requested;
+    if (!player.renderedCount || from >= player.duration) {
+      run.waiting = true;
+      set({ playing: true, status: 'Preparing the next sentence' });
+      return;
+    }
+    run.seekTarget = null; run.seekWordIndex = null; run.waiting = false; run.from = from;
+    await player.play(from);
+    if (current(run)) set({ playing: run.playRequested });
+  };
   player.attach({
     onTime: rebuild,
     onEnd: () => {
-      if (activeRun && current(activeRun) && activeRun.playRequested) {
+      if (activeRun && current(activeRun) && activeRun.playRequested && get().player.renderedCount < activeRun.doc.sentences.length) {
         activeRun.waiting = true; activeRun.from = get().player.time();
-        set({ playing: false, status: 'Preparing the next sentence' });
-      } else set({ playing: false, status: 'Finished' });
+        set({ playing: true, status: 'Preparing the next sentence' });
+      } else {
+        if (activeRun) { activeRun.playRequested = false; activeRun.waiting = false; }
+        set({ playing: false, status: 'Finished' });
+      }
     },
     onError: report,
   });
@@ -170,16 +206,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
         if (!current(run)) return;
         if (!run.engine.ready) throw new Error(get().engineError ?? 'The model could not be loaded.');
       }
-      const startPlayback = async () => {
-        if (!current(run) || !run.playRequested || player.isRunning) return;
-        if (run.seekTarget !== null && !player.hasSentence(run.seekTarget)) return;
-        const seek = run.seekWordIndex === null ? null : run.doc.words[run.seekWordIndex]?.startTime;
-        const from = seek ?? run.from;
-        run.seekTarget = null; run.seekWordIndex = null; run.waiting = false;
-        await player.play(Math.min(from, Math.max(0, player.duration - EDGE_PAD)));
-        if (current(run)) set({ playing: player.isRunning });
-      };
-      if (run.mode === 'stream' && saved.length >= Math.min(2, run.doc.sentences.length)) await startPlayback();
+      if (run.mode === 'stream' && saved.length >= Math.min(2, run.doc.sentences.length)) await startPlayback(run);
       for (let index = saved.length; index < run.doc.sentences.length; index++) {
         if (!current(run)) return;
         const synthesisStarted = performance.now();
@@ -202,13 +229,13 @@ export const useNarrate = create<State & Actions>((set, get) => {
         await updateEntry(run.docId, index + 1, run.doc.sentences.length);
         await updateJob(run.id, { completedSentences: index + 1 });
         if (!current(run)) return;
-        if (run.mode === 'stream' && (run.waiting || index + 1 >= Math.min(2, run.doc.sentences.length))) await startPlayback();
+        if (run.playRequested && (run.waiting || index + 1 >= Math.min(2, run.doc.sentences.length))) await startPlayback(run);
       }
       if (!current(run)) return;
       await updateEntry(run.docId, player.renderedCount, run.doc.sentences.length);
       await updateJob(run.id, { status: 'completed', finishedAt: Date.now(), completedSentences: player.renderedCount });
       if (!current(run)) return;
-      if (run.mode === 'stream') await startPlayback();
+      if (run.playRequested) await startPlayback(run);
       if (current(run)) set({ busy: false, cancel: null, duration: player.duration,
         status: player.isRunning ? 'Playing · audio saved' : 'Saved audio ready' });
     } catch (error) {
@@ -222,7 +249,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
     }
   };
   return {
-    library: [], generationJobs: [], hydrated: false, activeDocId: null, selectedModel: 'kokoro-q8',
+    library: [], generationJobs: [], hydrated: false, activeDocId: null, selectedModel: DEFAULT_MODEL_ID,
     doc: null, view: 'library', readerMode: 'page', generateMode: 'stream',
     voiceId: DEFAULT_VOICE_ID, speed: 1, engine: new WebKokoroEngine(), player,
     engineReady: false, engineLoading: false, modelProgress: null, engineError: null,
@@ -236,12 +263,14 @@ export const useNarrate = create<State & Actions>((set, get) => {
           const { library, jobs, preferences: prefs } = await storage.load();
           await loadDeviceMeasurements().catch(() => undefined);
           const generationJobs = jobs.map(job => job.status === 'running' ? { ...job, status: 'interrupted' as const, finishedAt: Date.now() } : job);
-          const selectedModel = prefs?.selectedModel ?? get().selectedModel;
+          const selectedModel = MODEL_VARIANTS.some(model => model.cacheId === prefs?.selectedModel)
+            ? prefs!.selectedModel : DEFAULT_MODEL_ID;
           const changedModel = selectedModel !== get().selectedModel;
           set({ library, generationJobs, hydrated: true, view: 'library', selectedModel,
             engine: changedModel ? new WebKokoroEngine(selectedModel) : get().engine,
-            voiceId: prefs?.voiceId && voiceById(prefs.voiceId) ? prefs.voiceId : DEFAULT_VOICE_ID,
-            speed: prefs?.speed ?? 1, generateMode: prefs?.generateMode ?? 'stream' });
+            voiceId: typeof prefs?.voiceId === 'string' && voiceById(prefs.voiceId) ? prefs.voiceId : DEFAULT_VOICE_ID,
+            speed: Number.isFinite(prefs?.speed) && prefs!.speed >= 0.5 && prefs!.speed <= 2 ? prefs!.speed : 1,
+            generateMode: prefs?.generateMode === 'full' ? 'full' : 'stream' });
           if (jobs.some(job => job.status === 'running')) await storage.saveJobs(generationJobs);
           if (typeof navigator !== 'undefined' && navigator.storage?.persist) void navigator.storage.persist().catch(() => undefined);
         } catch (error) { set({ hydrated: true, error: `Could not open local storage: ${message(error)}` }); }
@@ -257,16 +286,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
         const doc = { ...parsed, sourceName: parsed.sourceName ?? name };
         if (!doc.words.length) throw new Error('No readable text found. Scanned PDFs need text recognition before import.');
         if (epoch !== selectionEpoch) return false;
-        const id = freshId(); await storage.saveDocument(id, doc);
-        if (epoch !== selectionEpoch) return false;
-        const library = [entryFor(doc, id), ...get().library];
-        set({ library });
-        await storage.saveLibrary(library);
-        if (epoch !== selectionEpoch) return false;
-        get().player.setTimeline([]);
-        set({ doc, activeDocId: id, busy: false, status: 'Ready', playing: false,
-          time: 0, duration: 0, renderedCount: 0, currentWord: null, currentSentence: null, targetSentence: 0 });
-        return true;
+        return await saveAndOpenDocument(doc, epoch);
       } catch (error) {
         if (epoch === selectionEpoch) set({ busy: false, error: message(error), status: 'Ready' });
         return false;
@@ -299,11 +319,19 @@ export const useNarrate = create<State & Actions>((set, get) => {
         if (epoch === selectionEpoch) set({ busy: false });
       } catch (error) { if (epoch === selectionEpoch) set({ busy: false, error: message(error) }); }
     },
-    openSample() {
+    async openSample() {
       const existing = get().library.find(entry => entry.sourceName === 'Narrate sample.md');
-      if (existing) { void get().openLibraryDoc(existing.id); return; }
-      const sample = SAMPLE_DOC();
-      void get().openBuffer('Narrate sample.md', new TextEncoder().encode(sample.plain).buffer);
+      if (existing) {
+        await get().openLibraryDoc(existing.id);
+        return get().activeDocId === existing.id && !!get().doc && !get().error;
+      }
+      cancelRun(); const epoch = ++selectionEpoch;
+      set({ busy: true, status: 'Opening sample', error: null });
+      try { return await saveAndOpenDocument(SAMPLE_DOC(), epoch); }
+      catch (error) {
+        if (epoch === selectionEpoch) set({ busy: false, error: message(error), status: 'Ready' });
+        return false;
+      }
     },
     async removeDoc(id) {
       set(state => ({ library: state.library.filter(entry => entry.id !== id) }));
@@ -369,16 +397,23 @@ export const useNarrate = create<State & Actions>((set, get) => {
       const job: GenerationJob = { id: run.id, docId: activeDocId, title: doc.title, voiceId, modelId: engine.id, speed, mode,
         status: 'running', startedAt: Date.now(), completedSentences: get().renderedCount, totalSentences: doc.sentences.length };
       activeRun = run; get().player.pause();
-      set(state => ({ busy: true, playing: false, error: null, cancel: cancelRun, generateMode: mode,
+      set(state => ({ busy: true, playing: run.playRequested, error: null, cancel: cancelRun, generateMode: mode,
         status: mode === 'full' ? 'Rendering all · saving locally' : 'Preparing stream', generationJobs: [job, ...state.generationJobs] }));
       const task = production.catch(() => undefined).then(() => render(run)); production = task; await task;
     },
     async toggle() {
-      const { doc, player, playing, renderedCount } = get(); if (!doc) return;
+      const { doc, player, renderedCount } = get(); if (!doc) return;
       if (activeRun && current(activeRun)) {
-        activeRun.playRequested = !playing;
-        if (playing) { player.pause(); activeRun.from = player.time(); set({ playing: false }); }
-        else if (renderedCount > 0) { await player.play(get().time); set({ playing: player.isRunning }); }
+        const run = activeRun;
+        run.playRequested = !run.playRequested;
+        if (!run.playRequested) {
+          player.pause(); run.from = player.time(); run.waiting = false;
+          set({ playing: false, status: 'Paused · rendering continues' });
+        } else {
+          run.from = player.time(); set({ playing: true });
+          try { await startPlayback(run); }
+          catch (error) { run.playRequested = false; set({ playing: false }); report(error); }
+        }
         return;
       }
       if (renderedCount < doc.sentences.length) { await get().generate(get().generateMode); return; }
@@ -394,7 +429,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
       if (word.startTime === null || !player.hasSentence(word.sentenceIndex)) {
         if (activeRun && current(activeRun)) {
           player.pause(); activeRun.seekTarget = word.sentenceIndex; activeRun.seekWordIndex = index;
-          activeRun.playRequested = true; activeRun.waiting = true; set({ playing: false, status: 'Preparing audio for that word' }); return;
+          activeRun.playRequested = true; activeRun.waiting = true; set({ playing: true, status: 'Preparing audio for that word' }); return;
         }
         const task = get().generate('stream');
         if (activeRun) { activeRun.seekTarget = word.sentenceIndex; activeRun.seekWordIndex = index; activeRun.waiting = true; }
@@ -435,9 +470,4 @@ export const useNarrate = create<State & Actions>((set, get) => {
     clearError: () => set({ error: null }),
   };
 });
-export function readHash(): { view?: MainView; readerMode?: ReaderMode } {
-  if (typeof location === 'undefined') return {};
-  const match = /^#\/(player|reader|library|work|models|voices|lab|settings)(?:\/(page|focus))?$/.exec(location.hash);
-  return match ? { view: match[1] as MainView, readerMode: match[2] as ReaderMode | undefined } : {};
-}
 export { SENTENCE_GAP };

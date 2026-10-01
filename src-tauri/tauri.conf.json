@@ -20,6 +20,10 @@
       }
     ],
     "security": {
+      "headers": {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp"
+      },
       "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost https://huggingface.co https://*.huggingface.co https://cdn-lfs.hf.co https://*.hf.co; media-src 'self' blob: data:"
     }
   },

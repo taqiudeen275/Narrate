@@ -96,7 +96,11 @@ let step = 0;
 beforeSynthesis = async () => { if (++step === 2) { reachedSecond(); await pauseGate; } };
 const pausedRun = useNarrate.getState().generate('stream');
 await secondReached;
-// Simulate playback on the buffered prefix, then pause without cancelling work.
+// Pause the automatic playback request before enough audio is buffered, then
+// explicitly resume the prefix and pause again without cancelling generation.
+assert.equal(useNarrate.getState().playing, true, 'streaming retains playback intent while preparing audio');
+await useNarrate.getState().toggle();
+assert.equal(player.isRunning, false);
 await useNarrate.getState().toggle();
 assert.equal(player.isRunning, true);
 await useNarrate.getState().toggle();

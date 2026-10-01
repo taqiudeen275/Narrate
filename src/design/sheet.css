@@ -14,7 +14,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--s-5);
+  padding: calc(var(--s-5) + var(--safe-area-top)) calc(var(--s-5) + var(--safe-area-right)) calc(var(--s-5) + var(--safe-area-bottom)) calc(var(--s-5) + var(--safe-area-left));
+}
+
+/* Keep backdrop compositing separate from the moving sheet. An opacity
+   animation on their parent creates a backdrop root and can leave text sharp
+   in Android WebViews, including after an animation with retained fill. */
+.n-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
   /* A green-tinted veil rather than neutral black: the surface behind should
      still read as the same light world, just pushed back. */
   background: linear-gradient(
@@ -22,30 +31,34 @@
     rgb(29 59 45 / 0.18) 0%,
     rgb(29 59 45 / 0.34) 100%
   );
-  backdrop-filter: blur(8px) saturate(0.9);
-  -webkit-backdrop-filter: blur(8px) saturate(0.9);
-  animation: n-sheet-fade var(--t-mid) var(--ease-out) both;
+  backdrop-filter: blur(14px) saturate(0.9);
+  -webkit-backdrop-filter: blur(14px) saturate(0.9);
 }
 
 .n-sheet {
+  position: relative;
+  --sheet-offset: 1.5rem;
   display: flex;
   flex-direction: column;
   inline-size: 100%;
   max-inline-size: 46rem;
-  max-block-size: 82vh;
+  max-block-size: min(82dvh, calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 3rem));
   /* The list is the only child allowed to grow, so the sheet's own height is
      decided by head + search + foot and the rows scroll inside it. */
   min-block-size: 0;
   overflow: hidden;
   padding-block-end: var(--s-1);
   border-radius: var(--r-xl);
-  background: var(--glass-strong);
-  backdrop-filter: blur(calc(var(--glass-blur) * 1.4)) saturate(1.5);
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.4)) saturate(1.5);
+  /* Fully opaque is the baseline for WebViews without backdrop-filter. The
+     supported variant keeps only a faint trace of the backdrop's green wash. */
+  background: var(--ground);
   box-shadow: var(--sh-lg), 0 32px 72px rgb(29 59 45 / 0.16);
   color: var(--ink);
   overscroll-behavior: contain;
-  animation: n-sheet-rise var(--t-mid) var(--ease-out) both;
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .n-sheet { background: rgb(248 249 247 / 0.97); }
 }
 
 /* ------------------------------------------------------------------- head ---- */
@@ -303,14 +316,22 @@
 
 /* ------------------------------------------------------------------ motion ---- */
 
-@keyframes n-sheet-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
+.n-sheet[data-motion='css'] {
+  animation: n-sheet-rise 320ms var(--ease-out);
+}
+
+.n-sheet[data-motion='css'][data-closing='true'] {
+  animation: n-sheet-leave 180ms cubic-bezier(0.4, 0, 1, 1) forwards;
 }
 
 @keyframes n-sheet-rise {
-  from { opacity: 0; transform: translateY(1.5rem) scale(0.985); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { transform: translateY(var(--sheet-offset)); }
+  to { transform: translateY(0); }
+}
+
+@keyframes n-sheet-leave {
+  from { transform: translateY(0); }
+  to { transform: translateY(var(--sheet-offset)); }
 }
 
 @keyframes n-sheet-check {
@@ -319,12 +340,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .n-sheet-scrim,
-  .n-sheet,
+  .n-sheet[data-motion='css'],
   .n-sheet-check {
     animation: none;
   }
 }
+
+:root[data-reduce-motion='true'] .n-sheet[data-motion='css'],
+:root[data-reduce-motion='true'] .n-sheet-check { animation: none; }
 
 /* -------------------------------------------------------------- responsive ---- */
 
@@ -333,14 +356,15 @@
 @media (max-width: 640px) {
   .n-sheet-scrim {
     align-items: flex-end;
-    padding: 0;
+    padding: var(--safe-area-top) var(--safe-area-right) 0 var(--safe-area-left);
   }
 
   .n-sheet {
+    --sheet-offset: 100%;
     max-inline-size: none;
-    max-block-size: 92vh;
+    max-block-size: min(92dvh, calc(100dvh - var(--safe-area-top)));
     border-radius: var(--r-xl) var(--r-xl) 0 0;
-    padding-block-end: calc(var(--s-1) + env(safe-area-inset-bottom));
+    padding-block-end: calc(var(--s-1) + var(--safe-area-bottom));
     box-shadow: var(--sh-lg), 0 -24px 56px rgb(29 59 45 / 0.18);
   }
 

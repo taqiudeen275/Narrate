@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Icon } from '../design/Icon';
 import { ModelsView } from './ModelsView';
 import { GenerationView } from './GenerationView';
+import { PageTransition } from '../components/PageTransition';
 
 export function SettingsView({ initialTab = 'models' }: { initialTab?: 'models' | 'work' }) {
   const [tab, setTab] = useState(initialTab);
@@ -14,7 +15,7 @@ export function SettingsView({ initialTab = 'models' }: { initialTab?: 'models' 
           <button type="button" role="tab" id="settings-work" aria-selected={tab === 'work'} aria-controls="settings-content" className={`pill${tab === 'work' ? ' pill-primary' : ''}`} onClick={() => setTab('work')}><Icon name="history" size={16} />Work history</button>
         </div>
       </header>
-      <div id="settings-content" className="n-settings-content" role="tabpanel" aria-labelledby={`settings-${tab}`}>{tab === 'models' ? <ModelsView /> : <GenerationView />}</div>
+      <div id="settings-content" className="n-settings-content" role="tabpanel" aria-labelledby={`settings-${tab}`}><PageTransition viewKey={tab} position={tab === 'models' ? 0 : 1}>{tab === 'models' ? <ModelsView /> : <GenerationView />}</PageTransition></div>
     </div>
   );
 }

@@ -1,10 +1,8 @@
 /**
- * The document Narrate opens on first run.
+ * The sample available from Library when the reader chooses to try Narrate.
  *
- * It exists for two reasons. Practically, the first viewport is a thesis about
- * synchronized text, and a thesis needs something true to be a thesis about.
- * And practically again: the fastest way to hear whether a voice suits you is
- * to hear it say something you already know the shape of, not a lorem ipsum.
+ * The fastest way to hear whether a voice suits you is to hear it say something
+ * you already know the shape of.
  *
  * The content is written for the ear. Short paragraphs, concrete sentences,
  * numbers written the way they should be said.
@@ -85,8 +83,8 @@ the book without looking up from the page.
 
 let cached: Doc | null = null;
 
-/** Parsed once and shared; the sample never changes. */
+/** Keep the formatted source reusable without sharing mutable audio timing. */
 export function SAMPLE_DOC(): Doc {
-  if (!cached) cached = parseMarkdown(SAMPLE, 'Reading With Your Ears');
-  return cached;
+  if (!cached) cached = { ...parseMarkdown(SAMPLE, 'Reading With Your Ears'), sourceName: 'Narrate sample.md' };
+  return structuredClone(cached);
 }

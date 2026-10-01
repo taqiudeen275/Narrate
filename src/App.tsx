@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useNarrate, type MainView } from './state/store';
 import { Transport } from './components/Transport';
 import { VoiceSheet } from './components/VoiceSheet';
+import { PageTransition } from './components/PageTransition';
 import { PlayerView } from './views/PlayerView';
 import { ReaderView } from './views/ReaderView';
 import { VoicePicker } from './views/VoicePicker';
@@ -26,11 +28,12 @@ function sectionView(view: MainView): MainView {
   return view === 'models' || view === 'work' ? 'settings' : view;
 }
 
-function NavItems({ view, setView }: { view: MainView; setView: (v: MainView) => void }) {
+function NavItems({ view, setView, ready }: { view: MainView; setView: (v: MainView) => void; ready: boolean }) {
   return (
-    <nav className="n-nav" aria-label="Sections">
+    <nav className="n-nav" aria-label="Sections" aria-busy={!ready}>
       {SIDEBAR.map((item) => (
         <button key={item.view} type="button"
+          disabled={!ready}
           className={`n-navbtn${sectionView(view) === item.view ? ' n-navbtn-on' : ''}`}
           onClick={() => setView(item.view)}
           aria-current={sectionView(view) === item.view ? 'page' : undefined}>
@@ -42,17 +45,19 @@ function NavItems({ view, setView }: { view: MainView; setView: (v: MainView) =>
   );
 }
 
-function MobileNav({ view, setView, hasDoc }: { view: MainView; setView: (v: MainView) => void; hasDoc: boolean }) {
+function MobileNav({ view, setView, hasDoc, ready }: { view: MainView; setView: (v: MainView) => void; hasDoc: boolean; ready: boolean }) {
   const items = [SIDEBAR[0], SIDEBAR[1], { view: 'player' as MainView, icon: 'play' as IconName, label: 'Listen' }, SIDEBAR[2], SIDEBAR[3]];
+  const index = view === 'reader' ? 2 : Math.max(0, items.findIndex(item => item.view === sectionView(view)));
   return (
-    <nav className="n-bottomnav glass-strong" aria-label="Sections">
+    <nav className="n-bottomnav" aria-label="Sections" aria-busy={!ready}>
+      <span className="n-mobile-selection-track" aria-hidden="true"><span className="n-mobile-selection" style={{ transform: `translateX(${index * 100}%)`, opacity: index === 2 ? 0 : 1 }} /></span>
       {items.map((item) => {
         const center = item.view === 'player';
         const active = center ? view === 'player' || view === 'reader' : sectionView(view) === item.view;
         return (
           <button key={item.view} type="button"
             className={`n-mobile-navbtn${center ? ' n-mobile-navbtn-center' : ''}${active ? ' n-mobile-navbtn-on' : ''}`}
-            disabled={center && !hasDoc}
+            disabled={!ready || center && !hasDoc}
             aria-label={center && !hasDoc ? 'Listen — open a document from Library first' : item.label}
             title={center && !hasDoc ? 'Open a document from Library first' : item.label}
             aria-current={active ? 'page' : undefined}
@@ -67,11 +72,17 @@ function MobileNav({ view, setView, hasDoc }: { view: MainView; setView: (v: Mai
 }
 
 export default function App() {
-  const { doc, view, setView, hydrate, hydrated, busy, status, error, clearError,
-    generateMode, setGenerateMode } = useNarrate();
+  const { doc, activeDocId, view, setView, hydrate, hydrated, busy, status, error, clearError,
+    generateMode, setGenerateMode } = useNarrate(useShallow((state) => ({
+      doc: state.doc, activeDocId: state.activeDocId, view: state.view, setView: state.setView,
+      hydrate: state.hydrate, hydrated: state.hydrated, busy: state.busy, status: state.status,
+      error: state.error, clearError: state.clearError, generateMode: state.generateMode,
+      setGenerateMode: state.setGenerateMode,
+    })));
   const started = useRef(false);
   const [sheet, setSheet] = useState(false);
   const documentView = !!doc && (view === 'player' || view === 'reader');
+  const pagePosition = ['library', 'voices', 'player', 'reader', 'lab', 'settings'].indexOf(sectionView(view));
 
   useEffect(() => {
     if (started.current) return;
@@ -104,7 +115,7 @@ export default function App() {
           <span className="n-brand-mark"><Icon name="voice" size={15} strokeWidth={1.9} /></span>
           <span className="n-brand-name">Narrate</span>
         </div>
-        <NavItems view={view} setView={setView} />
+        <NavItems view={view} setView={setView} ready={hydrated} />
         {doc ? <button type="button" className={`n-rail-document${documentView ? ' n-rail-document-on' : ''}`}
           onClick={() => setView('player')} title={doc.title}>
           <Icon name="play" size={16} />
@@ -135,19 +146,19 @@ export default function App() {
         </header>
 
         <div className="n-stage">
-          {!hydrated ? <div className="n-startup" role="status" aria-busy="true"><div className="n-loading-bars" aria-hidden="true">{Array.from({ length: 7 }, (_, index) => <i key={index} style={{ animationDelay: `${index * -0.12}s` }} />)}</div><p>Opening your Library…</p></div> : <>
+          {!hydrated ? <div className="n-startup" role="status" aria-busy="true"><div className="n-loading-bars" aria-hidden="true">{Array.from({ length: 7 }, (_, index) => <i key={index} style={{ animationDelay: `${index * -0.12}s` }} />)}</div><p>Opening your Library…</p></div> : <PageTransition viewKey={`${view}:${documentView ? activeDocId : ''}`} position={pagePosition}>
             {documentView && view === 'player' ? <PlayerView onPickVoice={() => setSheet(true)} /> : null}
             {documentView && view === 'reader' ? <ReaderView /> : null}
             {view === 'library' || (!doc && (view === 'player' || view === 'reader')) ? <LibraryView /> : null}
             {view === 'voices' ? <VoicePicker onPickVoice={() => setSheet(true)} /> : null}
             {view === 'lab' ? <VoiceLab /> : null}
             {view === 'settings' || view === 'models' || view === 'work' ? <SettingsView initialTab={view === 'work' ? 'work' : 'models'} /> : null}
-          </>}
+          </PageTransition>}
         </div>
         {documentView ? <Transport onPickVoice={() => setSheet(true)} /> : null}
       </main>
       {sheet ? <VoiceSheet onClose={() => setSheet(false)} /> : null}
-      <MobileNav view={view} setView={setView} hasDoc={!!doc} />
+      <MobileNav view={view} setView={setView} hasDoc={!!doc} ready={hydrated} />
       {error ? <div className="n-toast" role="alert"><span>{error}</span><button type="button" className="n-toast-x" onClick={clearError} aria-label="Dismiss"><Icon name="close" size={15} /></button></div> : null}
     </div>
   );

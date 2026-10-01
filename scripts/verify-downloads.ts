@@ -83,6 +83,33 @@ const address = server.address();
 assert(address && typeof address !== 'string');
 const base = `http://127.0.0.1:${address.port}`;
 try {
+  // Browsers that validate fetch's Window receiver must not receive the
+  // downloader instance. Node's permissive fetch hid this mobile failure.
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = function (this: unknown, input, init) {
+    if (this !== globalThis) throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+    return nativeFetch.call(globalThis, input, init);
+  };
+  try {
+    const receiverStore = new MemoryStore();
+    const receiverDownloader = new ResumableDownloader({ store: receiverStore, retryCount: 0 });
+    await receiverDownloader.download({ url: `${base}/window-fetch`, file: 'window-fetch', sizeBytes: payload.length });
+    assert.deepEqual(new Uint8Array(await (await receiverStore.read(`${base}/window-fetch`))!.arrayBuffer()), payload,
+      'default fetch downloads successfully with a receiver-sensitive browser host');
+
+    const customClient = {
+      async fetch(input: RequestInfo | URL, init?: RequestInit) {
+        assert.equal(this, customClient, 'injected bound fetch retains its own receiver');
+        return nativeFetch.call(globalThis, input, init);
+      },
+    };
+    const injectedStore = new MemoryStore();
+    const injected = new ResumableDownloader({ store: injectedStore, fetcher: customClient.fetch.bind(customClient), retryCount: 0 });
+    await injected.download({ url: `${base}/custom-fetch`, file: 'custom-fetch', sizeBytes: payload.length });
+    assert.deepEqual(new Uint8Array(await (await injectedStore.read(`${base}/custom-fetch`))!.arrayBuffer()), payload,
+      'injected fetch still transfers and persists the original bytes');
+  } finally { globalThis.fetch = nativeFetch; }
+
   const store = new MemoryStore();
   const downloader = new ResumableDownloader({ store, concurrency: 3, checkpointBytes: 8192, retryCount: 0 });
   const controller = new AbortController();
@@ -150,7 +177,7 @@ try {
   await next.download(allBytes);
   assert.equal(requests, beforeComplete, 'checkpointed full-size file completes locally, avoiding invalid EOF Range');
   assert.equal((await store.get(allBytes.url))?.complete, true);
-  console.log('Model download checks passed: resume, offline reuse, deduplication, parallel limit, range fallback, size validation, catalogue paths.');
+  console.log('Model download checks passed: browser fetch receiver, injected fetch, resume, offline reuse, deduplication, parallel limit, range fallback, size validation, catalogue paths.');
 } finally {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));

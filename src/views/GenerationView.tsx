@@ -1,4 +1,5 @@
 import { useNarrate } from '../state/store';
+import { useShallow } from 'zustand/react/shallow';
 import { Icon } from '../design/Icon';
 import { voiceById } from '../core/tts/voices';
 import { MODEL_VARIANTS } from '../core/tts/downloads';
@@ -7,7 +8,11 @@ const dateTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'nume
 const LABELS = { running: 'Generating', completed: 'Complete', cancelled: 'Stopped', failed: 'Failed', interrupted: 'Interrupted' };
 
 export function GenerationView() {
-  const { generationJobs, library, engineLoading, modelProgress, status, cancel, openLibraryDoc, setView } = useNarrate();
+  const { generationJobs, library, engineLoading, modelProgress, status, cancel, openLibraryDoc, setView } = useNarrate(useShallow(state => ({
+    generationJobs: state.generationJobs, library: state.library, engineLoading: state.engineLoading,
+    modelProgress: state.modelProgress, status: state.status, cancel: state.cancel,
+    openLibraryDoc: state.openLibraryDoc, setView: state.setView,
+  })));
   const jobs = [...generationJobs].sort((a, b) => b.startedAt - a.startedAt);
   const running = jobs.find((job) => job.status === 'running');
   const downloadPercent = modelProgress?.fraction != null ? Math.round(modelProgress.fraction * 100) : null;

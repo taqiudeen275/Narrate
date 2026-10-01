@@ -107,7 +107,9 @@ export class ResumableDownloader {
     checkpointBytes?: number; retryCount?: number;
   }) {
     this.store = options.store;
-    this.fetcher = options.fetcher ?? fetch;
+    // Window fetch validates its receiver on some mobile browsers. Calling a
+    // stored bare function as this.fetcher would give it the downloader as this.
+    this.fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
     this.concurrency = Math.max(1, options.concurrency ?? 4);
     this.checkpointBytes = options.checkpointBytes ?? 1024 * 1024;
     this.retryCount = options.retryCount ?? 2;
