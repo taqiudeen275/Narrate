@@ -50,7 +50,7 @@ export function Transport({ onPickVoice }: { onPickVoice?: () => void }) {
   const {
     doc, playing, time, duration, voiceId, targetSentence,
     toggle, stepSentence, stepParagraph, seekTime,
-    busy, engineLoading, modelProgress, renderedCount, engine, player,
+    busy, engineLoading, modelProgress, renderedCount, engine, player, generateMode,
   } = useNarrate();
 
   const voice = voiceById(voiceId);
@@ -97,7 +97,7 @@ export function Transport({ onPickVoice }: { onPickVoice?: () => void }) {
         label={playing ? 'Pause' : 'Play'}
         primary
         onClick={() => void toggle()}
-        disabled={!doc || (working && !playing)}
+        disabled={!doc || (working && !playing && (engineLoading || !renderedCount || generateMode === 'full'))}
       />
 
       <div className="n-transport-track">

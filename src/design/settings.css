@@ -42,3 +42,16 @@
   .n-job-details { gap: var(--s-4); }
   .n-job-foot { flex-wrap: wrap; }
 }
+
+.n-model-list { display: grid; gap: 18px; }
+.n-model-card { padding: clamp(20px, 3vw, 30px); background: var(--glass); border-radius: 24px; box-shadow: var(--sh-sm); }
+.n-model-card-selected { background: var(--glass-strong); }
+.n-model-top { display: flex; justify-content: space-between; align-items: start; gap: 14px; }
+.n-model-top h3 { margin: 0 0 8px; font-size: 20px; font-weight: 500; }
+.n-model-top p, .n-model-transfer, .n-model-description, .n-model-note { color: var(--ink-2); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.n-model-status { flex-shrink: 0; font-size: 12px; font-weight: 500; color: var(--accent); padding: 7px 10px; border-radius: 14px; background: var(--glass-strong); }
+.n-model-description { margin: 16px 0; }
+.n-model-transfer { font-size: 12px; }
+.n-model-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.n-model-note { margin-block-start: 24px; max-inline-size: 66ch; }
+@media (max-width: 480px) { .n-model-top { flex-direction: column; } .n-model-top h3 { font-size: 18px; } .n-model-actions .pill { min-block-size: 44px; } }

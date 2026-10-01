@@ -1,4 +1,9 @@
 <resources>
-    <string name="app_name">"narrate"</string>
-    <string name="main_activity_title">"narrate"</string>
+    <!--
+      "Narrate", not "narrate". This string is what the launcher puts under the
+      icon on the home screen and in the app drawer, so its capitalisation is
+      part of the product's identity rather than a detail.
+    -->
+    <string name="app_name">Narrate</string>
+    <string name="main_activity_title">Narrate</string>
 </resources>

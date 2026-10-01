@@ -80,6 +80,31 @@ await useNarrate.getState().generate('stream');
 assert.equal(player.renderedCount, 7, 'stream continues beyond its initial lookahead');
 assert.equal(useNarrate.getState().library[0].audioReady, true, 'stream saves all generated audio');
 
+await open('seek.txt', 'First word here. Second word there. Third word ends.');
+const wanted = useNarrate.getState().doc!.sentences[2].wordStart + 1;
+await useNarrate.getState().seekWord(wanted);
+assert.equal(player.position, useNarrate.getState().doc!.words[wanted].startTime, 'unrendered seeking lands on requested word after streaming');
+
+await open('pause.txt', 'Pause while this renders. Then resume while rendering.');
+let releasePause!: () => void;
+let reachedSecond!: () => void;
+const secondReached = new Promise<void>(resolve => { reachedSecond = resolve; });
+const pauseGate = new Promise<void>(resolve => { releasePause = resolve; });
+let step = 0;
+beforeSynthesis = async () => { if (++step === 2) { reachedSecond(); await pauseGate; } };
+const pausedRun = useNarrate.getState().generate('stream');
+await secondReached;
+// Simulate playback on the buffered prefix, then pause without cancelling work.
+await useNarrate.getState().toggle();
+assert.equal(player.isRunning, true);
+await useNarrate.getState().toggle();
+assert.equal(player.isRunning, false);
+releasePause();
+await pausedRun;
+beforeSynthesis = null;
+assert.equal(player.isRunning, false, 'new chunks cannot undo an explicit pause');
+assert.equal(player.renderedCount, 2, 'pausing playback does not stop generation');
+
 await open('cancel.txt', 'Cancel this sentence. Keep the later sentences.');
 const cancelledId = useNarrate.getState().activeDocId!;
 let release!: () => void;
@@ -94,6 +119,26 @@ beforeSynthesis = null;
 assert.match(useNarrate.getState().doc!.plain, /Replacement/);
 assert.equal(player.renderedCount, 0, 'cancelled old synthesis cannot contaminate newly selected document');
 assert.equal(useNarrate.getState().generationJobs.find(j => j.docId === cancelledId)!.status, 'cancelled');
+await useNarrate.getState().openLibraryDoc(cancelledId);
+const callsBeforeResume = calls;
+await useNarrate.getState().generate('full');
+assert.equal(calls - callsBeforeResume, 2, 'cancelled unfinished job can be resumed');
+assert.equal(useNarrate.getState().generationJobs[0].status, 'completed');
+
+const { storage } = await import('../src/state/persistence');
+const interrupted = { ...useNarrate.getState().generationJobs[0], id: 'interrupted-test', status: 'running' as const };
+await storage.saveJobs([interrupted]);
+useNarrate.setState({ hydrated: false });
+await useNarrate.getState().hydrate();
+assert.equal(useNarrate.getState().generationJobs[0].status, 'interrupted', 'unfinished audit recovers after restart');
 await useNarrate.getState().removeDoc(firstId);
 assert.equal(useNarrate.getState().library.some(e => e.id === firstId), false);
+await open('delete-one.txt', 'Delete the first document.');
+const deleteOne = useNarrate.getState().activeDocId!;
+await open('delete-two.txt', 'Delete the second document.');
+const deleteTwo = useNarrate.getState().activeDocId!;
+await open('keep.txt', 'Keep this document.');
+await Promise.all([useNarrate.getState().removeDoc(deleteOne), useNarrate.getState().removeDoc(deleteTwo)]);
+assert.equal(useNarrate.getState().library.some(e => e.id === deleteOne || e.id === deleteTwo), false, 'concurrent deletes never resurrect a broken library entry');
+assert.equal((await storage.load()).library.some(e => e.id === deleteOne || e.id === deleteTwo), false);
 console.log('State regressions passed: Library startup, durable documents/audio/audit, cache reuse, full/stream semantics, input failure, cancellation, deletion.');

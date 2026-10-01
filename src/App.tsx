@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNarrate, readHash, type MainView } from './state/store';
+import { useNarrate, type MainView } from './state/store';
 import { Transport } from './components/Transport';
 import { VoiceSheet } from './components/VoiceSheet';
 import { PlayerView } from './views/PlayerView';
@@ -77,10 +77,7 @@ export default function App() {
     if (started.current) return;
     started.current = true;
     void hydrate().then(() => {
-      const hash = readHash();
-      if (hash.readerMode) useNarrate.getState().setReaderMode(hash.readerMode);
-      if (hash.view && hash.view !== 'player' && hash.view !== 'reader') setView(hash.view);
-      else setView('library');
+      setView('library');
     });
   }, [hydrate, setView]);
 

@@ -248,10 +248,12 @@ export const useNarrate = create<State & Actions>((set, get) => {
         if (epoch !== selectionEpoch) return false;
         const id = freshId(); await storage.saveDocument(id, doc);
         if (epoch !== selectionEpoch) return false;
-        const library = [entryFor(doc, id), ...get().library]; await storage.saveLibrary(library);
+        const library = [entryFor(doc, id), ...get().library];
+        set({ library });
+        await storage.saveLibrary(library);
         if (epoch !== selectionEpoch) return false;
         get().player.setTimeline([]);
-        set({ doc, activeDocId: id, library, busy: false, status: 'Ready', playing: false,
+        set({ doc, activeDocId: id, busy: false, status: 'Ready', playing: false,
           time: 0, duration: 0, renderedCount: 0, currentWord: null, currentSentence: null, targetSentence: 0 });
         return true;
       } catch (error) {
@@ -280,6 +282,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
       void get().openBuffer('Narrate sample.md', new TextEncoder().encode(sample.plain).buffer);
     },
     async removeDoc(id) {
+      set(state => ({ library: state.library.filter(entry => entry.id !== id) }));
       if (get().activeDocId === id) {
         cancelRun(); ++selectionEpoch; get().player.setTimeline([]);
         set({ doc: null, activeDocId: null, playing: false, time: 0, duration: 0, renderedCount: 0,
@@ -287,7 +290,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
       }
       try {
         await storage.removeDocument(id);
-        const library = get().library.filter(entry => entry.id !== id); await storage.saveLibrary(library); set({ library });
+        await storage.saveLibrary(get().library);
       } catch (error) { report(error); }
     },
     setView(view) {
@@ -314,6 +317,8 @@ export const useNarrate = create<State & Actions>((set, get) => {
     async selectModel(selectedModel) {
       if (!['kokoro-q4', 'kokoro-q8', 'kokoro-fp32'].includes(selectedModel) || selectedModel === get().selectedModel) return;
       cancelRun(); const epoch = ++selectionEpoch;
+      const oldEngine = get().engine;
+      void production.catch(() => undefined).then(() => oldEngine.dispose());
       get().player.setTimeline([]);
       set({ selectedModel, engine: new WebKokoroEngine(selectedModel), engineReady: false, engineLoading: false,
         modelProgress: null, engineError: null, playing: false, renderedCount: 0, time: 0, duration: 0 });
@@ -334,6 +339,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
       const { doc, activeDocId, voiceId, speed, engine, time } = get();
       if (!doc || !activeDocId) return;
       cancelRun();
+      ++selectionEpoch;
       const run: Run = { id: freshId(), docId: activeDocId, doc, voiceId, speed, engine, mode,
         cancelled: false, playRequested: mode === 'stream', waiting: false, from: time, seekTarget: null, seekWordIndex: null };
       const job: GenerationJob = { id: run.id, docId: activeDocId, title: doc.title, voiceId, speed, mode,
