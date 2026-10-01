@@ -4,8 +4,9 @@ import { Player, encodeMp3, encodeWav } from '../src/core/audio/player';
 import { MPEGDecoder } from 'mpg123-decoder';
 
 type Start = { at: number; offset: number };
+type TestBuffer = { length: number; sampleRate: number; getChannelData: () => Float32Array };
 class TestSource {
-  buffer: unknown;
+  buffer: TestBuffer | null = null;
   onended: (() => void) | null = null;
   starts: Start[] = [];
   stopped = false;
@@ -21,9 +22,9 @@ class TestContext {
   destination = {};
   sources: TestSource[] = [];
   createGain() { return { connect() {}, disconnect() {} }; }
-  createBuffer(_channels: number, length: number, _rate: number) {
+  createBuffer(_channels: number, length: number, rate: number) {
     const samples = new Float32Array(length);
-    return { getChannelData: () => samples };
+    return { length, sampleRate: rate, getChannelData: () => samples };
   }
   createBufferSource() {
     const node = new TestSource();
@@ -55,6 +56,12 @@ function fixture() {
   player.putSentence(0, new Float32Array(48000), 24000);
   return { player, ctx };
 }
+function finishSource(ctx: TestContext, source: TestSource) {
+  assert(source.buffer, 'scheduled source has a buffer');
+  const { at, offset } = source.starts[0];
+  ctx.currentTime = at + source.buffer.length / source.buffer.sampleRate - offset;
+  source.onended?.();
+}
 const near = (got: number, wanted: number) => assert.ok(Math.abs(got - wanted) < 1e-6, `${got} != ${wanted}`);
 let failures = 0;
 async function test(name: string, run: () => void | Promise<void>) {
@@ -78,6 +85,64 @@ await test('appended streaming audio is scheduled once without restarting curren
   assert.equal(ctx.sources[0].stopped, false);
   near(ctx.sources[1].starts[0].at, 12.37);
   player.pause();
+});
+await test('overdue streaming refill plays all new PCM while animation frames are suspended', async () => {
+  const { player, ctx } = fixture();
+  await player.play(0);
+  ctx.currentTime = 15;
+  player.putSentence(1, new Float32Array(24000), 24000);
+  assert.equal(ctx.sources.length, 2, 'the new sentence must still be scheduled after the old buffer drains');
+  near(ctx.sources[1].starts[0].offset, 0);
+  near(ctx.sources[1].starts[0].at, 15.07);
+  near(player.time(), 2.3);
+  player.pause();
+});
+await test('source completion ends the padded timeline without an animation frame', async () => {
+  const { player, ctx } = fixture();
+  let ends = 0;
+  player.attach({ onEnd: () => { ends++; } });
+  await player.play(0);
+  player.putSentence(1, new Float32Array(24000), 24000);
+  finishSource(ctx, ctx.sources[0]);
+  assert.equal(player.isRunning, true, 'ending an earlier source must retain the scheduled sentence');
+  assert.equal(ends, 0);
+  finishSource(ctx, ctx.sources[1]);
+  near(ctx.currentTime, 13.52);
+  near(player.time(), 3.52);
+  assert.equal(player.isRunning, false);
+  assert.equal(ends, 1);
+  assert.equal(frames.size, 0);
+});
+await test('seeking into the final silent padding completes without animation frames', async () => {
+  const { player, ctx } = fixture();
+  let ends = 0;
+  player.attach({ onEnd: () => { ends++; } });
+  await player.play(2.2);
+  assert.equal(ctx.sources.length, 1, 'the silent tail needs a source completion callback');
+  finishSource(ctx, ctx.sources[0]);
+  near(ctx.currentTime, 10.1);
+  near(player.time(), 2.3);
+  assert.equal(player.isRunning, false);
+  assert.equal(ends, 1);
+});
+await test('obsolete source completion cannot finish replacement audio or restart a paused player', async () => {
+  const { player, ctx } = fixture();
+  let ends = 0;
+  player.attach({ onEnd: () => { ends++; } });
+  await player.play(0);
+  const oldEnd = ctx.sources[0].onended;
+  player.putSentence(0, new Float32Array(24000), 24000);
+  oldEnd?.();
+  assert.equal(player.isRunning, true);
+  assert.equal(ends, 0);
+  const replacedEnd = ctx.sources[1].onended;
+  player.pause();
+  replacedEnd?.();
+  oldEnd?.();
+  player.putSentence(1, new Float32Array(24000), 24000);
+  assert.equal(player.isRunning, false);
+  assert.equal(ctx.sources.length, 2, 'appending after pause must not restart playback');
+  assert.equal(ends, 0);
 });
 await test('pause freezes the playhead and resume slices the current sentence', async () => {
   const { player, ctx } = fixture();

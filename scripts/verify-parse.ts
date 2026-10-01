@@ -148,7 +148,7 @@ if (hasDom) {
     `<html><head><title>Doc</title></head><body><h1>Head</h1><p>One.</p><p>Two <em>em</em> here.</p><ul><li>a</li></ul></body></html>`,
   )));
 } else {
-  console.log('\nhtml — SKIPPED (no DOMParser in this runtime; verified in-browser)');
+  console.log('\nhtml — covered by verify-source.ts using a local DOM');
 }
 
 // A single-block document is the case that the separator accounting broke.

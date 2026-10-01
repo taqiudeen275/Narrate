@@ -36,14 +36,23 @@ assert(availableVoices().every((voice: any) => downloads.SUPPORTED_VOICE_IDS.inc
 
 const payload = new Uint8Array(96 * 1024).map((_, i) => i % 251);
 const ranges: string[] = [];
-let active = 0;
-let peak = 0;
+let parallelActive = 0;
+let parallelPeak = 0;
 let requests = 0;
 const server = createServer((req, res) => {
   requests++;
-  active++;
-  peak = Math.max(peak, active);
-  res.on('close', () => active--);
+  const parallel = req.url?.startsWith('/parallel-');
+  let sending = true;
+  const finishBody = () => {
+    if (!sending) return;
+    sending = false;
+    if (parallel) parallelActive--;
+  };
+  if (parallel) {
+    parallelActive++;
+    parallelPeak = Math.max(parallelPeak, parallelActive);
+  }
+  res.on('close', finishBody);
   const range = String(req.headers.range ?? '');
   ranges.push(range);
   const offset = Number(/bytes=(\d+)-/.exec(range)?.[1] ?? 0);
@@ -58,10 +67,13 @@ const server = createServer((req, res) => {
   });
   let position = 0;
   const tick = () => {
-    if (res.destroyed) return;
-    if (position >= body.length) { res.end(); return; }
+    if (res.destroyed) { finishBody(); return; }
+    if (position >= body.length) { finishBody(); res.end(); return; }
     res.write(body.subarray(position, position + 8192));
-    position += 8192;
+    position = Math.min(position + 8192, body.length);
+    // Content-Length lets the client finish on the last byte. Finish the
+    // fixture at that same boundary, before another transfer takes its slot.
+    if (position === body.length) { finishBody(); res.end(); return; }
     setTimeout(tick, 3);
   };
   tick();
@@ -93,9 +105,36 @@ try {
   const sharedBefore = requests;
   await Promise.all([next.download(duplicated), next.download(duplicated)]);
   assert.equal(requests, sharedBefore + 1, 'concurrent models share common file transfers');
-  peak = 0;
+  const rejoinStore = new MemoryStore();
+  let releaseCheckpoint!: () => void;
+  const checkpointHeld = new Promise<void>((resolve) => { releaseCheckpoint = resolve; });
+  let checkpointEntered!: () => void;
+  const checkpointStarted = new Promise<void>((resolve) => { checkpointEntered = resolve; });
+  const appendCheckpoint = rejoinStore.append.bind(rejoinStore);
+  let holdFirstCheckpoint = true;
+  rejoinStore.append = async (url, chunk, meta) => {
+    await appendCheckpoint(url, chunk, meta);
+    if (holdFirstCheckpoint) {
+      holdFirstCheckpoint = false;
+      checkpointEntered();
+      await checkpointHeld;
+    }
+  };
+  const rejoinDownloader = new ResumableDownloader({ store: rejoinStore, checkpointBytes: 8192, retryCount: 0 });
+  const rejoinFile = { url: `${base}/cancel-rejoin`, file: 'cancel-rejoin', sizeBytes: payload.length };
+  const rejoinController = new AbortController();
+  const cancelled = rejoinDownloader.download(rejoinFile, { signal: rejoinController.signal });
+  const cancellation = assert.rejects(cancelled, { name: 'AbortError' });
+  await checkpointStarted;
+  rejoinController.abort();
+  const resumed = rejoinDownloader.download(rejoinFile);
+  releaseCheckpoint();
+  await assert.doesNotReject(resumed, 'a fresh consumer waits for the aborted writer and resumes its checkpoint');
+  await cancellation;
+  assert.deepEqual(new Uint8Array(await (await rejoinStore.read(rejoinFile.url))!.arrayBuffer()), payload);
+
   await Promise.all(Array.from({ length: 7 }, (_, i) => next.download({ url: `${base}/parallel-${i}`, file: `${i}`, sizeBytes: payload.length })));
-  assert(peak >= 2 && peak <= 3, `controlled parallel transfers: peak ${peak}`);
+  assert(parallelPeak >= 2 && parallelPeak <= 3, `controlled parallel transfers: peak ${parallelPeak}`);
 
   const ignored = { url: `${base}/ignore-range`, file: 'ignored', sizeBytes: payload.length };
   await store.append(ignored.url, new Blob([payload.subarray(0, 8192)]), {
@@ -105,6 +144,12 @@ try {
   assert.deepEqual(new Uint8Array(await (await store.read(ignored.url))!.arrayBuffer()), payload, 'server ignoring Range restarts cleanly without duplicate bytes');
   await assert.rejects(next.download({ url: `${base}/wrong-size`, file: 'bad', sizeBytes: payload.length + 1 }), /size|length|incomplete/i);
   assert.equal((await store.get(`${base}/wrong-size`))?.complete, false, 'truncated weights never become ready');
+  const allBytes = { url: `${base}/all-bytes`, file: 'all-bytes', sizeBytes: payload.length };
+  await store.append(allBytes.url, new Blob([payload]), { url: allBytes.url, bytes: payload.length, total: payload.length, complete: false, headers: {} });
+  const beforeComplete = requests;
+  await next.download(allBytes);
+  assert.equal(requests, beforeComplete, 'checkpointed full-size file completes locally, avoiding invalid EOF Range');
+  assert.equal((await store.get(allBytes.url))?.complete, true);
   console.log('Model download checks passed: resume, offline reuse, deduplication, parallel limit, range fallback, size validation, catalogue paths.');
 } finally {
   server.closeAllConnections();

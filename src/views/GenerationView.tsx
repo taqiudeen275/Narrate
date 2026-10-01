@@ -1,6 +1,7 @@
 import { useNarrate } from '../state/store';
 import { Icon } from '../design/Icon';
 import { voiceById } from '../core/tts/voices';
+import { MODEL_VARIANTS } from '../core/tts/downloads';
 
 const dateTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const LABELS = { running: 'Generating', completed: 'Complete', cancelled: 'Stopped', failed: 'Failed', interrupted: 'Interrupted' };
@@ -26,11 +27,12 @@ export function GenerationView() {
       {!jobs.length ? <section className="n-work-empty"><Icon name="history" size={30} /><h3>Your first narration starts in Library.</h3><p>Open a document, choose a narrator, and press play. Each attempt will be recorded here, including work that is stopped or interrupted.</p><button type="button" className="pill" onClick={() => setView('library')}><Icon name="library" size={16} />Go to Library</button></section> : <ol className="n-job-list">
         {jobs.map((job) => {
           const narrator = voiceById(job.voiceId)?.name ?? job.voiceId;
+          const model = MODEL_VARIANTS.find(variant => variant.cacheId === job.modelId)?.name ?? job.modelId ?? 'Not recorded';
           const percent = Math.min(100, Math.round(job.completedSentences / Math.max(1, job.totalSentences) * 100));
           const available = library.some((entry) => entry.id === job.docId);
           return <li key={job.id} className={`n-job${job.status === 'running' ? ' n-job-running' : ''}`}>
             <div className="n-job-heading"><div><h3>{job.title}</h3><p>{dateTime.format(job.startedAt)} · {job.mode === 'stream' ? 'Stream' : 'Full render'}</p></div><span className={`n-job-state n-job-state-${job.status}`}><Icon name={job.status === 'completed' ? 'check' : job.status === 'running' ? 'voice' : job.status === 'failed' ? 'close' : 'stop'} size={14} />{LABELS[job.status]}</span></div>
-            <dl className="n-job-details"><div><dt>Narrator</dt><dd>{narrator}</dd></div><div><dt>Speed</dt><dd>{job.speed}×</dd></div><div><dt>Sentences</dt><dd>{job.completedSentences.toLocaleString()} / {job.totalSentences.toLocaleString()}</dd></div>{job.finishedAt ? <div><dt>Finished</dt><dd>{dateTime.format(job.finishedAt)}</dd></div> : null}</dl>
+            <dl className="n-job-details"><div><dt>Narrator</dt><dd>{narrator}</dd></div><div><dt>Model</dt><dd>{model}</dd></div><div><dt>Speed</dt><dd>{job.speed}×</dd></div><div><dt>Sentences</dt><dd>{job.completedSentences.toLocaleString()} / {job.totalSentences.toLocaleString()}</dd></div>{job.finishedAt ? <div><dt>Finished</dt><dd>{dateTime.format(job.finishedAt)}</dd></div> : null}</dl>
             <div className="n-job-progress" role="progressbar" aria-label={`${job.title}: sentences generated`} aria-valuemin={0} aria-valuemax={job.totalSentences} aria-valuenow={job.completedSentences} aria-valuetext={`${percent}% · ${LABELS[job.status]}`}><span style={{ inlineSize: `${percent}%` }} /></div>
             {job.error ? <p className="n-job-error">{job.error}</p> : job.status === 'interrupted' ? <p className="n-job-note">The app closed before this attempt finished. Open the document to continue.</p> : null}
             <div className="n-job-foot"><span>{available ? `${percent}% generated` : 'Document removed from Library'}</span><div>{job.id === running?.id && cancel ? <button type="button" className="pill" onClick={cancel}><Icon name="stop" size={14} />Stop</button> : null}<button type="button" className="pill" disabled={!available} onClick={() => void open(job.docId)}><Icon name="page" size={14} />Open document</button></div></div>

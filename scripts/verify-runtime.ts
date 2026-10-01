@@ -17,4 +17,8 @@ globalThis.fetch = async () => { requests++; throw new Error('Network is disable
 const result = await getModelFile('onnx-community/Kokoro-82M-v1.0-ONNX', 'tokenizer_config.json', true);
 assert.equal(new TextDecoder().decode(result), '{"offline":true}');
 assert.equal(requests, 0, 'real Transformers cache load never needs a network request');
-console.log('Runtime offline regression passed: real Transformers loader reads the exact installed cache URL with network disabled.');
+const { phonemize } = await import('phonemizer');
+const phones = await phonemize('Offline speech is ready.', 'en-us');
+assert(phones.join('').length > 0, 'the packaged eSpeak phonemizer works with network blocked');
+assert.equal(requests, 0, 'phonemizer data and WASM do not fetch external assets');
+console.log('Runtime offline regression passed: real Transformers cache loader and packaged eSpeak phonemizer work with network disabled.');

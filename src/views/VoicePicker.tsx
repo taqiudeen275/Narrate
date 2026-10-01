@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { useNarrate } from '../state/store';
 import { VoiceAvatar } from '../design/VoiceAvatar';
 import { Icon } from '../design/Icon';
-import { availableVoices, type Voice } from '../core/tts/voices';
+import { availableVoices } from '../core/tts/voices';
+import { useAudition } from '../components/useAudition';
 
 /**
  * The full cast.
@@ -19,7 +20,7 @@ export function VoicePicker({ onPickVoice }: { onPickVoice?: () => void }) {
   } = useNarrate();
   const [accent, setAccent] = useState('All');
   const [query, setQuery] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const { audition, error } = useAudition(engine, ensureEngine);
 
   const voices = useMemo(() => availableVoices(), []);
   const accents = useMemo(
@@ -35,24 +36,6 @@ export function VoicePicker({ onPickVoice }: { onPickVoice?: () => void }) {
         (!q || v.name.toLowerCase().includes(q) || v.persona.toLowerCase().includes(q)),
     );
   }, [voices, accent, query]);
-
-  const audition = async (v: Voice) => {
-    setError(null);
-    await ensureEngine();
-    if (!engine.ready) return;
-    try {
-      const chunk = await engine.synthesize(v.sample, v.id, { speed: 1 });
-      const ctx = new AudioContext();
-      const buf = ctx.createBuffer(1, chunk.samples.length, chunk.sampleRate);
-      buf.getChannelData(0).set(chunk.samples);
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.connect(ctx.destination);
-      src.start();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
 
   return (
     <div className="n-panel-view">
@@ -139,7 +122,7 @@ export function VoicePicker({ onPickVoice }: { onPickVoice?: () => void }) {
                   type="button"
                   className="pill pill-quiet"
                   disabled={busy}
-                  onClick={() => void audition(v)}
+                  onClick={() => void audition(v.sample, v.id)}
                 >
                   <Icon name="play" size={13} />
                   {engineReady ? 'Audition' : 'Load model to audition'}

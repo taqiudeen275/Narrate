@@ -3,6 +3,7 @@ import { useNarrate } from '../state/store';
 import { Icon } from '../design/Icon';
 import { VoiceAvatar } from '../design/VoiceAvatar';
 import { KOKORO_VOICES, voiceById } from '../core/tts/voices';
+import { useAudition } from '../components/useAudition';
 
 /**
  * The Voice Lab.
@@ -24,6 +25,7 @@ export function VoiceLab() {
   const [name, setName] = useState('');
   const [reference, setReference] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { audition, error: auditionError } = useAudition(engine, ensureEngine);
 
   const submit = async () => {
     setError(null);
@@ -36,21 +38,7 @@ export function VoiceLab() {
     );
   };
 
-  const audition = async (id: string) => {
-    await ensureEngine();
-    if (!engine.ready) return;
-    const chunk = await engine.synthesize(
-      'The quiet room held its breath, and every word arrived exactly on time.',
-      id,
-    );
-    const ctx = new AudioContext();
-    const buf = ctx.createBuffer(1, chunk.samples.length, chunk.sampleRate);
-    buf.getChannelData(0).set(chunk.samples);
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.connect(ctx.destination);
-    src.start();
-  };
+  const preview = (id: string) => audition('The quiet room held its breath, and every word arrived exactly on time.', id);
 
   return (
     <div className="n-panel-view">
@@ -109,7 +97,7 @@ export function VoiceLab() {
             </button>
           </div>
 
-          {error ? <p className="n-error" role="alert">{error}</p> : null}
+          {error || auditionError ? <p className="n-error" role="alert">{auditionError ?? error}</p> : null}
 
           <div className="n-notice">
             <strong>What is missing.</strong> Kokoro — the engine currently in use — has no
@@ -142,9 +130,9 @@ export function VoiceLab() {
                 role="button"
                 tabIndex={0}
                 aria-label={`Audition ${v.name}`}
-                onClick={(e) => { e.stopPropagation(); void audition(v.id); }}
+                onClick={(e) => { e.stopPropagation(); if (!busy) void preview(v.id); }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); void audition(v.id); }
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (!busy) void preview(v.id); }
                 }}
               >
                 ▸

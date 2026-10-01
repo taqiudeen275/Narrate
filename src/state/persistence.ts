@@ -13,6 +13,7 @@ export interface LibraryEntry {
   renderedCount: number;
   totalSentences: number;
   audioReady: boolean;
+  narration?: { modelId: string; voiceId: string; speed: number };
 }
 
 export interface GenerationJob {
@@ -20,6 +21,8 @@ export interface GenerationJob {
   docId: string;
   title: string;
   voiceId: string;
+  /** Earlier saved attempts predate model-edition tracking. */
+  modelId?: string;
   speed: number;
   mode: 'stream' | 'full';
   status: 'running' | 'completed' | 'cancelled' | 'failed' | 'interrupted';

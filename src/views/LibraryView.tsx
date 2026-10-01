@@ -54,7 +54,7 @@ export function LibraryView() {
       <header className="n-panel-head n-lib-head">
         <div>
           <h1 className="n-panel-title">Your Library</h1>
-          <p className="n-panel-sub">Keep your documents and their audio together. Pick up where you left off.</p>
+          <p className="n-panel-sub">Keep your documents and their audio together. Reopen and play what you’ve saved.</p>
         </div>
         <button type="button" className="pill pill-primary" disabled={busy || !!opening} onClick={() => fileRef.current?.click()}><Icon name="plus" size={17} />Add a document</button>
       </header>
@@ -88,7 +88,7 @@ export function LibraryView() {
         {library.length ? <label className="n-searchwrap n-lib-search"><Icon name="search" size={17} /><input type="search" className="input" placeholder="Find a document" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search Library" /></label> : null}
       </div>
 
-      {!library.length ? <div className="n-lib-empty"><Icon name="library" size={34} /><h3>One document is a good beginning.</h3><p>Add a file or paste some text. Your Library, saved audio, and listening place will be here when you come back.</p></div> : !filtered.length ? <div className="n-lib-empty"><h3>No documents match “{query}”.</h3><button type="button" className="pill" onClick={() => setQuery('')}>Clear search</button></div> : <div className="n-libgrid">
+      {!library.length ? <div className="n-lib-empty"><Icon name="library" size={34} /><h3>One document is a good beginning.</h3><p>Add a file or paste some text. Your Library and saved audio will be here when you come back.</p></div> : !filtered.length ? <div className="n-lib-empty"><h3>No documents match “{query}”.</h3><button type="button" className="pill" onClick={() => setQuery('')}>Clear search</button></div> : <div className="n-libgrid">
         {filtered.map((entry) => {
           const active = entry.id === activeDocId;
           const progress = Math.min(100, Math.round(entry.renderedCount / Math.max(1, entry.totalSentences) * 100));

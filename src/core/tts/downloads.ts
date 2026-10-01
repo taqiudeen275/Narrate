@@ -116,6 +116,11 @@ export class ResumableDownloader {
   download(file: DownloadFile, options: DownloadOptions = {}): Promise<DownloadRecord> {
     if (options.signal?.aborted) return Promise.reject(abortError());
     let job = this.jobs.get(file.url);
+    if (job?.controller.signal.aborted) {
+      // A new model can request this file while a cancelled owner's final
+      // checkpoint is committing. Resume only after that writer releases it.
+      return job.promise.catch(() => undefined).then(() => this.download(file, options));
+    }
     if (!job) {
       const controller = new AbortController();
       job = { file, controller, listeners: new Set(), consumers: 0, promise: Promise.resolve(null as unknown as DownloadRecord) };
@@ -185,6 +190,12 @@ export class ResumableDownloader {
       await this.store.reset(file.url);
       offset = 0;
       record = undefined;
+    }
+    if (offset === file.sizeBytes && record) {
+      record = { ...record, complete: true };
+      await this.store.complete(file.url, record);
+      this.progress(job, record.bytes, record.total);
+      return record;
     }
     const headers: Record<string, string> = {};
     if (offset) {
@@ -387,6 +398,7 @@ export function installModel(cacheId: string, onProgress?: (progress: ModelLoadP
   publish({ ...modelInstall(cacheId), status: 'queued', error: undefined });
   const promise = (async () => {
     let backgroundStarted = false;
+    let transfers: Promise<DownloadRecord>[] = [];
     try {
       await beginBackgroundWork('Downloading voice models');
       backgroundStarted = true;
@@ -394,7 +406,7 @@ export function installModel(cacheId: string, onProgress?: (progress: ModelLoadP
       const loaded = new Map<string, number>();
       const stored = await Promise.all(files.map((file) => modelStore.get(file.url)));
       files.forEach((file, i) => loaded.set(file.url, stored[i]?.bytes ?? 0));
-      await Promise.all(files.map((file) => downloader.download(file, {
+      transfers = files.map((file) => downloader.download(file, {
         signal: controller.signal,
         onProgress: (progress) => {
           loaded.set(file.url, progress.loaded);
@@ -402,11 +414,15 @@ export function installModel(cacheId: string, onProgress?: (progress: ModelLoadP
           publish({ cacheId, status: 'downloading', loaded: count, total, file: progress.file });
           onProgress?.({ file: progress.file, loaded: count, total, fraction: count / total });
         },
-      })));
+      }));
+      await Promise.all(transfers);
       await cacheOfflineVoices(files);
       publish({ cacheId, status: 'installed', loaded: total, total, file: '' });
     } catch (error) {
       controller.abort();
+      // Shared consumers can reject immediately while an owned checkpoint
+      // writer is still draining. Keep the session and service until it stops.
+      await Promise.allSettled(transfers);
       publish({ ...modelInstall(cacheId), status: isAborted(error) ? 'paused' : 'error', error: isAborted(error) ? undefined : error instanceof Error ? error.message : String(error) });
       throw error;
     } finally {

@@ -51,7 +51,7 @@ function tokensOfSentence(doc: Doc, sentenceIndex: number): Token[] {
 
 export function ReaderView() {
   const {
-    doc, time, playing, currentSentence, readerMode, setReaderMode,
+    doc, activeDocId, time, playing, currentSentence, readerMode, setReaderMode,
     seekWord, setView,
   } = useNarrate();
 
@@ -75,16 +75,6 @@ export function ReaderView() {
     });
   }, [doc]);
 
-  /** First sentence index per block, so block refs can register in O(1). */
-  const firstSentenceOfBlock = useMemo(() => {
-    const map = new Map<number, number>();
-    if (!doc) return map;
-    for (const s of doc.sentences) {
-      if (!map.has(s.blockIndex)) map.set(s.blockIndex, s.index);
-    }
-    return map;
-  }, [doc]);
-
   // Follow the narrator while playing, but stop following the moment the user
   // takes the scroll. Yanking the page back from someone who is reading ahead is
   // the fastest way to make a follow-along view unusable.
@@ -98,10 +88,12 @@ export function ReaderView() {
       el.removeEventListener('wheel', onScroll);
       el.removeEventListener('touchmove', onScroll);
     };
-  }, []);
+  }, [isFocus]);
+
+  useEffect(() => { following.current = true; }, [activeDocId, isFocus]);
 
   useEffect(() => {
-    if (!playing || !currentSentence || isFocus) return;
+    if (!following.current || !playing || !currentSentence || isFocus) return;
     const el = sentenceRefs.current.get(currentSentence.index);
     if (!el) return;
     if (el.getBoundingClientRect().top < 90 ||
@@ -147,8 +139,14 @@ export function ReaderView() {
             ]
               .filter(Boolean)
               .join(' ')}
+            ref={(el) => {
+              if (w.index !== doc.sentences[w.sentenceIndex].wordStart) return;
+              if (el) sentenceRefs.current.set(w.sentenceIndex, el);
+              else sentenceRefs.current.delete(w.sentenceIndex);
+            }}
             onClick={(event) => {
               event.stopPropagation();
+              following.current = true;
               void seekWord(w.index);
             }}
             role="button"
@@ -157,6 +155,7 @@ export function ReaderView() {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 e.stopPropagation();
+                following.current = true;
                 void seekWord(w.index);
               }
             }}
@@ -209,7 +208,6 @@ export function ReaderView() {
               return (
                 <p
                   key={i}
-                  ref={(el) => { if (el) sentenceRefs.current.set(i, el); }}
                   className={`n-focus-sentence${isNow ? ' n-focus-now' : ''}`}
                   onClick={() => void seekWord(s.wordStart)}
                 >
@@ -257,11 +255,6 @@ export function ReaderView() {
           <div
             key={bi}
             className={`n-block n-block-${block.kind}`}
-            ref={(el) => {
-              if (!el) return;
-              const first = firstSentenceOfBlock.get(bi);
-              if (first !== undefined) sentenceRefs.current.set(first, el);
-            }}
           >
             {block.kind === 'heading' ? (
               <h2 className={`n-h n-h-${block.level ?? 2}`}>{renderTokens(tokensByBlock[bi])}</h2>

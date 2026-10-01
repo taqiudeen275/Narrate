@@ -3,11 +3,14 @@ import type { Doc, Sentence, Word } from '../core/types';
 import { distributeSentence, wordAtTime } from '../core/types';
 import { parseDocument } from '../core/parse';
 import { Player, encodeMp3, encodeWav, type Segment } from '../core/audio/player';
+import { saveAudioExport } from '../core/audio/export';
 import type { ModelLoadProgress, TtsEngine } from '../core/tts/engine';
 import { EDGE_PAD, SENTENCE_GAP } from '../core/tts/engine';
 import { WebKokoroEngine } from '../core/tts/web';
 import { DEFAULT_VOICE_ID, voiceById } from '../core/tts/voices';
+import { MODEL_VARIANTS } from '../core/tts/downloads';
 import { beginBackgroundWork, endBackgroundWork } from '../core/background';
+import { loadDeviceMeasurements, recordGenerationMeasurement } from '../core/tts/device';
 import { SAMPLE_DOC } from './sample';
 import { storage, type LibraryEntry, type GenerationJob } from './persistence';
 
@@ -99,9 +102,12 @@ export const useNarrate = create<State & Actions>((set, get) => {
     await storage.saveJobs(get().generationJobs);
   };
   const updateEntry = async (id: string, count: number, total: number) => {
-    set(state => ({ library: state.library.map(entry => entry.id === id ? {
-      ...entry, renderedCount: count, totalSentences: total, audioReady: count === total && total > 0,
-    } : entry) }));
+    const { engine, voiceId, speed } = get();
+    set(state => ({ library: state.library.map(entry => {
+      if (entry.id !== id || !count && entry.narration) return entry;
+      return { ...entry, renderedCount: count, totalSentences: total, audioReady: count === total && total > 0,
+        narration: count ? { modelId: engine.id, voiceId, speed } : undefined };
+    }) }));
     await storage.saveLibrary(get().library);
   };
   const cancelRun = () => {
@@ -176,9 +182,12 @@ export const useNarrate = create<State & Actions>((set, get) => {
       if (run.mode === 'stream' && saved.length >= Math.min(2, run.doc.sentences.length)) await startPlayback();
       for (let index = saved.length; index < run.doc.sentences.length; index++) {
         if (!current(run)) return;
+        const synthesisStarted = performance.now();
         const chunk = await run.engine.synthesize(run.doc.sentences[index].text, run.voiceId, { speed: run.speed });
         if (!current(run)) return;
         if (!chunk.samples.length || !Number.isFinite(chunk.sampleRate) || chunk.sampleRate <= 0) throw new Error('The model returned empty or invalid audio.');
+        void recordGenerationMeasurement(run.engine.id, chunk.samples.length / chunk.sampleRate,
+          performance.now() - synthesisStarted, run.speed).catch(() => undefined);
         const previous = player.segments.at(-1);
         const segment: Segment = { sentenceIndex: index, samples: chunk.samples, sampleRate: chunk.sampleRate,
           duration: chunk.samples.length / chunk.sampleRate,
@@ -225,6 +234,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
       hydration = (async () => {
         try {
           const { library, jobs, preferences: prefs } = await storage.load();
+          await loadDeviceMeasurements().catch(() => undefined);
           const generationJobs = jobs.map(job => job.status === 'running' ? { ...job, status: 'interrupted' as const, finishedAt: Date.now() } : job);
           const selectedModel = prefs?.selectedModel ?? get().selectedModel;
           const changedModel = selectedModel !== get().selectedModel;
@@ -243,7 +253,8 @@ export const useNarrate = create<State & Actions>((set, get) => {
       set({ busy: true, status: `Reading ${name}`, error: null });
       try {
         if (!(buffer instanceof ArrayBuffer) || !buffer.byteLength) throw new Error('That file is empty. Choose a file containing readable text.');
-        const doc = await parseDocument(name, buffer);
+        const parsed = await parseDocument(name, buffer);
+        const doc = { ...parsed, sourceName: parsed.sourceName ?? name };
         if (!doc.words.length) throw new Error('No readable text found. Scanned PDFs need text recognition before import.');
         if (epoch !== selectionEpoch) return false;
         const id = freshId(); await storage.saveDocument(id, doc);
@@ -268,6 +279,19 @@ export const useNarrate = create<State & Actions>((set, get) => {
         const doc = await storage.loadDocument(id);
         if (!doc) throw new Error('The saved document could not be found. Import the original file again.');
         if (epoch !== selectionEpoch) return;
+        const saved = get().library.find(entry => entry.id === id)?.narration;
+        if (saved && voiceById(saved.voiceId) && Number.isFinite(saved.speed) && saved.speed >= 0.5 && saved.speed <= 2) {
+          const oldEngine = get().engine;
+          const supported = MODEL_VARIANTS.some(model => model.cacheId === saved.modelId);
+          if (supported || saved.modelId === oldEngine.id) {
+            const engine = saved.modelId === oldEngine.id ? oldEngine : new WebKokoroEngine(saved.modelId);
+            if (engine !== oldEngine) void production.catch(() => undefined).then(() => oldEngine.dispose());
+            set({ engine, selectedModel: supported ? saved.modelId : get().selectedModel,
+              voiceId: saved.voiceId, speed: saved.speed, engineReady: engine.ready,
+              engineLoading: false, engineError: null, modelProgress: null });
+            void preferences();
+          }
+        }
         get().player.setTimeline([]);
         set({ doc, activeDocId: id, renderedCount: 0, time: 0, duration: 0, playing: false,
           currentWord: null, currentSentence: null, targetSentence: 0 });
@@ -342,7 +366,7 @@ export const useNarrate = create<State & Actions>((set, get) => {
       ++selectionEpoch;
       const run: Run = { id: freshId(), docId: activeDocId, doc, voiceId, speed, engine, mode,
         cancelled: false, playRequested: mode === 'stream', waiting: false, from: time, seekTarget: null, seekWordIndex: null };
-      const job: GenerationJob = { id: run.id, docId: activeDocId, title: doc.title, voiceId, speed, mode,
+      const job: GenerationJob = { id: run.id, docId: activeDocId, title: doc.title, voiceId, modelId: engine.id, speed, mode,
         status: 'running', startedAt: Date.now(), completedSentences: get().renderedCount, totalSentences: doc.sentences.length };
       activeRun = run; get().player.pause();
       set(state => ({ busy: true, playing: false, error: null, cancel: cancelRun, generateMode: mode,
@@ -402,9 +426,10 @@ export const useNarrate = create<State & Actions>((set, get) => {
       try {
         const { chunks, sampleRate } = player.toExportChunks();
         const blob = format === 'wav' ? encodeWav(chunks, sampleRate) : await encodeMp3(chunks, sampleRate);
-        const url = URL.createObjectURL(blob); const link = document.createElement('a');
-        link.href = url; link.download = `${doc.title.replace(/[^\w\s-]/g, '').trim().slice(0, 60) || 'narrate'}.${format}`;
-        link.click(); setTimeout(() => URL.revokeObjectURL(url), 30000); set({ busy: false, status: `Exported ${format.toUpperCase()}` });
+        const filename = `${doc.title.replace(/[^\w\s-]/g, '').trim().slice(0, 60) || 'narrate'}.${format}`;
+        set({ status: 'Choose where to save your audio' });
+        const saved = await saveAudioExport(blob, filename);
+        set({ busy: false, status: saved ? `Exported ${format.toUpperCase()}` : 'Export cancelled · saved audio kept' });
       } catch (error) { set({ busy: false, error: message(error), status: 'Export failed' }); }
     },
     clearError: () => set({ error: null }),

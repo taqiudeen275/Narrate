@@ -194,6 +194,8 @@ export class Player {
     samples: Float32Array,
     sampleRate: number,
   ): void {
+    const bufferedDuration = this.duration;
+    const bufferedTime = this.time();
     const duration = samples.length / sampleRate;
     const existing = this.segments.findIndex((s) => s.sentenceIndex === sentenceIndex);
     const isAppend = existing < 0 && this.segments.every((segment) => segment.sentenceIndex < sentenceIndex);
@@ -202,6 +204,12 @@ export class Player {
     this.recomputeStarts();
     this.rendered.add(sentenceIndex);
     if (this.running) {
+      if (isAppend && bufferedTime >= bufferedDuration) {
+        // A hidden WebView may deliver new audio before a queued ended event.
+        // Freeze at the old buffer boundary so that waiting skips no new PCM.
+        this.originDocTime = bufferedTime;
+        this.originCtxTime = this.context.currentTime;
+      }
       // Appends leave the currently playing source alone. Replacing an earlier
       // sentence changes future start times, so rebuild that schedule instead.
       if (!isAppend) this.stopSources();
@@ -285,10 +293,14 @@ export class Player {
     const ctx = this.context;
     if (!ctx || !this.master) return;
     const base = this.originCtxTime;
+    const version = this.playbackVersion;
     for (const s of this.segments) {
-      if (s.start + s.duration <= t) continue;
+      const paddedDuration = s.duration + EDGE_PAD;
+      if (s.start + paddedDuration <= t) continue;
       if (this.sources.some((source) => source.sentenceIndex === s.sentenceIndex)) continue;
-      const buffer = ctx.createBuffer(1, s.samples.length, s.sampleRate);
+      // The final source ends at the padded timeline boundary. Its Web Audio
+      // callback still completes playback when animation frames are suspended.
+      const buffer = ctx.createBuffer(1, s.samples.length + Math.round(EDGE_PAD * s.sampleRate), s.sampleRate);
       buffer.getChannelData(0).set(s.samples);
       const node = ctx.createBufferSource();
       node.buffer = buffer;
@@ -298,18 +310,23 @@ export class Player {
       // Seeking inside a sentence must skip the preceding PCM, not merely move
       // its start time. Account for scheduling work that elapsed on the clock.
       const offset = Math.max(0, this.originDocTime + (at - base) - s.start);
-      if (offset >= s.duration) { node.disconnect(); continue; }
+      if (offset >= paddedDuration) { node.disconnect(); continue; }
       node.start(at, offset);
       this.sources.push({ node, sentenceIndex: s.sentenceIndex });
       node.onended = () => {
+        if (version !== this.playbackVersion || !this.sources.some((source) => source.node === node)) return;
         this.sources = this.sources.filter((source) => source.node !== node);
         node.disconnect();
+        if (this.running && !this.sources.length) this.finishPlayback();
       };
     }
   }
 
   private stopSources(): void {
-    for (const s of this.sources) {
+    const sources = this.sources;
+    this.sources = [];
+    for (const s of sources) {
+      s.node.onended = null;
       try {
         s.node.stop();
         s.node.disconnect();
@@ -317,7 +334,13 @@ export class Player {
         /* already stopped */
       }
     }
-    this.sources = [];
+  }
+
+  private finishPlayback(): void {
+    this.originDocTime = this.duration;
+    this.running = false;
+    this.pause();
+    this.events.onEnd?.();
   }
 
   private tick = (): void => {
@@ -326,10 +349,7 @@ export class Player {
     const d = this.duration;
     this.events.onTime?.(t, d);
     if (d > 0 && t >= d - 0.01) {
-      this.originDocTime = d;
-      this.running = false;
-      this.pause();
-      this.events.onEnd?.();
+      this.finishPlayback();
       return;
     }
     this.raf = requestAnimationFrame(this.tick);

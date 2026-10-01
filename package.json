@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "verify": "tsx scripts/verify-parse.ts",
+    "verify": "node scripts/verify-all.mjs",
     "app:dev": "tauri dev",
     "app:build": "tauri build",
     "app:android:init": "tauri android init",
@@ -41,11 +41,17 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
     "fake-indexeddb": "^6.2.5",
+    "linkedom": "^0.18.13",
     "mpg123-decoder": "^1.0.3",
     "sharp": "^0.35.5",
     "tsx": "^4.23.15",
     "typescript": "~6.0.3",
     "vite": "^8.0.16"
+  },
+  "overrides": {
+    "@huggingface/transformers": {
+      "sharp": "0.35.5"
+    }
   },
   "productName": "Narrate"
 }

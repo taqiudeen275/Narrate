@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNarrate } from '../state/store';
 import { VoiceAvatar } from '../design/VoiceAvatar';
 import { Icon } from '../design/Icon';
-import { availableVoices, type Voice } from '../core/tts/voices';
+import { availableVoices } from '../core/tts/voices';
+import { useAudition } from './useAudition';
 
 /**
  * Narrator picker, as a sheet over the current screen.
@@ -15,7 +16,7 @@ import { availableVoices, type Voice } from '../core/tts/voices';
 export function VoiceSheet({ onClose }: { onClose: () => void }) {
   const { voiceId, setVoice, engine, engineReady, ensureEngine, busy } = useNarrate();
   const [query, setQuery] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const { audition, error } = useAudition(engine, ensureEngine);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -28,24 +29,6 @@ export function VoiceSheet({ onClose }: { onClose: () => void }) {
   const list = voices.filter(
     (v) => !q || v.name.toLowerCase().includes(q) || v.persona.toLowerCase().includes(q),
   );
-
-  const audition = async (v: Voice) => {
-    setError(null);
-    await ensureEngine();
-    if (!engine.ready) return;
-    try {
-      const chunk = await engine.synthesize(v.sample, v.id, { speed: 1 });
-      const ctx = new AudioContext();
-      const buf = ctx.createBuffer(1, chunk.samples.length, chunk.sampleRate);
-      buf.getChannelData(0).set(chunk.samples);
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.connect(ctx.destination);
-      src.start();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
 
   return (
     <div className="n-sheet-scrim" onClick={onClose} role="presentation">
@@ -105,7 +88,7 @@ export function VoiceSheet({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   className="icon-btn icon-btn-sm"
-                  onClick={() => void audition(v)}
+                  onClick={() => void audition(v.sample, v.id)}
                   disabled={busy}
                   aria-label={`Audition ${v.name}`}
                   title={engineReady ? 'Audition' : 'Load the model to audition'}

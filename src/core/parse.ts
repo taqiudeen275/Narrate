@@ -64,50 +64,74 @@ export class DocBuilder {
 
 const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'NAV', 'HEAD', 'SVG', 'TEMPLATE']);
 const HEADINGS: Record<string, number> = { H1: 1, H2: 2, H3: 3, H4: 4, H5: 5, H6: 6 };
+const DOM_BLOCKS = new Set(['P', 'DIV', 'SECTION', 'ARTICLE', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'PRE', 'HR',
+  'MAIN', 'ASIDE', 'HEADER', 'FOOTER', 'FIGURE', 'FIGCAPTION', 'TABLE', 'TBODY', 'THEAD', 'TR', 'TD', 'TH', 'DL', 'DT', 'DD']);
+
+/** textContent includes scripts and joins both sides of a BR without a space. */
+function readableText(node: Node): string {
+  if (node.nodeType === 3) return node.textContent ?? '';
+  if (node.nodeType !== 1) return '';
+  const tag = (node as Element).tagName.toUpperCase();
+  if (SKIP.has(tag)) return '';
+  if (tag === 'BR') return '\n';
+  const text = Array.from(node.childNodes).map(readableText).join('');
+  return DOM_BLOCKS.has(tag) || HEADINGS[tag] ? `\n${text}\n` : text;
+}
+
+function hasNestedBlock(node: Element): boolean {
+  return Array.from(node.children).some(child => DOM_BLOCKS.has(child.tagName.toUpperCase()) ||
+    !!HEADINGS[child.tagName.toUpperCase()] || hasNestedBlock(child));
+}
 
 /** Turn a DOM subtree into ordered blocks. Shared by docx, epub, and html. */
 export function blocksFromDom(root: Element, b: DocBuilder, depth = 0): void {
-  for (const node of Array.from(root.children)) {
-    if (SKIP.has(node.tagName)) continue;
-    const tag = node.tagName;
+  let inline = '';
+  const flush = () => { b.add('paragraph', inline); inline = ''; };
+  for (const child of Array.from(root.childNodes)) {
+    if (child.nodeType === 3) { inline += child.textContent ?? ''; continue; }
+    if (child.nodeType !== 1) continue;
+    const node = child as Element;
+    const tag = node.tagName.toUpperCase();
+    if (SKIP.has(tag)) continue;
+    if (tag === 'BR') { inline += ' '; continue; }
     const level = HEADINGS[tag];
     if (level) {
-      b.add('heading', node.textContent ?? '', level);
+      flush();
+      b.add('heading', readableText(node), level);
       continue;
     }
     if (tag === 'P' || tag === 'DIV' || tag === 'SECTION' || tag === 'ARTICLE') {
-      const hasBlockChild = Array.from(node.children).some((c) =>
-        HEADINGS[c.tagName] || ['P', 'UL', 'OL', 'BLOCKQUOTE', 'PRE', 'DIV'].includes(c.tagName),
-      );
-      if (hasBlockChild) blocksFromDom(node, b, depth + 1);
-      else b.add('paragraph', node.textContent ?? '');
+      flush();
+      if (hasNestedBlock(node)) blocksFromDom(node, b, depth + 1);
+      else b.add('paragraph', readableText(node));
       continue;
     }
     if (tag === 'UL' || tag === 'OL') {
+      flush();
       for (const li of Array.from(node.children)) {
-        if (li.tagName === 'LI') b.add('listItem', li.textContent ?? '');
+        if (li.tagName.toUpperCase() === 'LI') b.add('listItem', readableText(li));
       }
       continue;
     }
     if (tag === 'BLOCKQUOTE') {
-      b.add('quote', node.textContent ?? '');
+      flush();
+      b.add('quote', readableText(node));
       continue;
     }
     if (tag === 'PRE') {
-      b.add('code', node.textContent ?? '');
+      flush();
+      b.addRaw('code', readableText(node));
       continue;
     }
     if (tag === 'HR') {
+      flush();
       b.add('paragraph', '— — —');
       continue;
     }
-    if (tag === 'BR') continue;
-    // Inline content sitting directly under a container: treat as a paragraph
-    // only if it carries actual words, otherwise recurse for nested blocks.
-    const text = node.textContent ?? '';
-    if (/\p{L}|\p{N}/u.test(text) && !node.children.length) b.add('paragraph', text);
-    else blocksFromDom(node, b, depth + 1);
+    if (DOM_BLOCKS.has(tag) || hasNestedBlock(node)) { flush(); blocksFromDom(node, b, depth + 1); }
+    else inline += readableText(node);
   }
+  flush();
 }
 
 function titleFromDom(doc: Document, fallback: string): string {
@@ -121,10 +145,13 @@ function titleFromDom(doc: Document, fallback: string): string {
 function parsePlainText(text: string): Doc {
   const b = new DocBuilder();
   for (const para of text.split(/\n\s*\n/)) {
-    const t = para.replace(/^#+\s*/, '').trim();
+    const t = para.trim();
     if (!t) continue;
-    const heading = /^(#{1,6})\s+(.*)$/m.exec(para.trim());
-    if (heading && para.trim().startsWith('#')) b.add('heading', heading[2], heading[1].length);
+    const heading = /^(#{1,6})[ \t]+([^\n]*)(?:\n([\s\S]*))?$/.exec(t);
+    if (heading) {
+      b.add('heading', heading[2], heading[1].length);
+      if (heading[3]) b.add('paragraph', heading[3]);
+    }
     else b.add('paragraph', t);
   }
   return b.build(firstLineTitle(text) ?? 'Document');
@@ -230,7 +257,10 @@ async function parseEpub(buf: ArrayBuffer, fileName: string): Promise<Doc> {
       for (const itemref of Array.from(opf.querySelectorAll('spine > itemref'))) {
         const href = manifest.get(itemref.getAttribute('idref') ?? '');
         if (!href) continue;
-        const entry = zip.file(decodeURIComponent(base + href));
+        // Manifest hrefs are relative URIs, not ZIP paths. Normalize dot
+        // segments and remove fragments before looking up the archive entry.
+        const resolved = new URL(href, `https://epub.invalid/${base}`);
+        const entry = zip.file(decodeURIComponent(resolved.pathname.slice(1)));
         if (!entry) continue;
         const html = new DOMParser().parseFromString(await entry.async('text'), 'text/html');
         blocksFromDom(html.body, b);
@@ -252,8 +282,15 @@ function parseRtf(text: string, fileName: string): Doc {
     'fonttbl', 'colortbl', 'stylesheet', 'info', 'pict', 'object', 'header',
     'footer', 'footnote', 'listtable', 'rsidtbl', 'generator', 'themedata',
   ]);
-  const skipStack: boolean[] = [];
+  const groupStack: { skipping: boolean; unicodeFallback: number; encoding: string }[] = [];
   let skipping = false;
+  let unicodeFallback = 1;
+  let fallbackLeft = 0;
+  let encoding = 'windows-1252';
+  const emit = (value: string) => {
+    if (fallbackLeft > 0) { fallbackLeft--; return; }
+    if (!skipping) out += value;
+  };
 
   while (i < text.length) {
     const c = text[i];
@@ -263,27 +300,42 @@ function parseRtf(text: string, fileName: string): Doc {
         const word = m[1];
         const arg = m[2];
         if (drop.has(word)) {
-          if (!skipping) { skipping = true; skipStack.push(true); }
+          skipping = true;
+        } else if (word === 'uc' && arg) {
+          unicodeFallback = Math.max(0, parseInt(arg, 10));
+        } else if (word === 'ansicpg' && arg) {
+          const candidate = `windows-${arg}`;
+          try { new TextDecoder(candidate); encoding = candidate; } catch { /* retain the previous supported codepage */ }
         } else if (word === 'u' && arg) {
           if (!skipping) out += String.fromCharCode(parseInt(arg, 10) < 0 ? parseInt(arg, 10) + 65536 : parseInt(arg, 10));
+          fallbackLeft = unicodeFallback;
         } else if (word === 'par' || word === 'line' || word === 'sect') {
           if (!skipping) out += '\n\n';
         } else if (word === 'tab') {
           if (!skipping) out += ' ';
+        } else if (word === 'emdash' || word === 'endash' || word === 'lquote' || word === 'rquote' || word === 'ldblquote' || word === 'rdblquote') {
+          emit(({ emdash: '—', endash: '–', lquote: '‘', rquote: '’', ldblquote: '“', rdblquote: '”' })[word]);
         }
         i += m[0].length;
         continue;
       }
       const esc = /^\\([\\{}])/.exec(text.slice(i));
-      if (esc) { if (!skipping) out += esc[1]; i += 2; continue; }
+      if (esc) { emit(esc[1]); i += 2; continue; }
       const hex = /^\\'([0-9a-fA-F]{2})/.exec(text.slice(i));
-      if (hex) { if (!skipping) out += String.fromCharCode(parseInt(hex[1], 16)); i += 4; continue; }
+      if (hex) { emit(new TextDecoder(encoding).decode(new Uint8Array([parseInt(hex[1], 16)]))); i += 4; continue; }
+      if (text[i + 1] === '*') { skipping = true; i += 2; continue; }
+      if (text[i + 1] === '~') { emit(' '); i += 2; continue; }
+      if (text[i + 1] === '-' || text[i + 1] === '_') { emit(text[i + 1] === '_' ? '‑' : ''); i += 2; continue; }
       i += 1;
       continue;
     }
-    if (c === '{') { skipStack.push(skipping); i += 1; continue; }
-    if (c === '}') { skipping = skipStack.pop() ?? false; i += 1; continue; }
-    if (!skipping) out += c;
+    if (c === '{') { groupStack.push({ skipping, unicodeFallback, encoding }); i += 1; continue; }
+    if (c === '}') {
+      const group = groupStack.pop();
+      skipping = group?.skipping ?? false; unicodeFallback = group?.unicodeFallback ?? 1; encoding = group?.encoding ?? 'windows-1252';
+      fallbackLeft = 0; i += 1; continue;
+    }
+    if (c !== '\r' && c !== '\n') emit(c);
     i += 1;
   }
   const cleaned = out.replace(/\n{3,}/g, '\n\n');
@@ -405,7 +457,7 @@ export async function parseDocument(fileName: string, buf: ArrayBuffer): Promise
       // Unknown extension: if it decodes as text, read it as text rather than
       // refusing outright.
       const t = await text();
-      if (/[ --]/.test(t.slice(0, 2048))) {
+      if (/[\x00-\x08\x0e-\x1f]/.test(t.slice(0, 2048))) {
         throw new Error(
           `"${ext}" is not a document format Narrate can read. Supported: ${SUPPORTED.join(', ')}.`,
         );

@@ -40,17 +40,23 @@ export class WebKokoroEngine implements TtsEngine {
   private async doLoad(epoch: number, onProgress?: (progress: ModelLoadProgress) => void) {
     await installModel(this.cacheId, onProgress);
     if (epoch !== this.epoch) throw new DOMException('Model load cancelled', 'AbortError');
-    this.worker = new Worker(new URL('./kokoro.worker.ts', import.meta.url), { type: 'module' });
-    this.worker.onmessage = ({ data }: MessageEvent<KokoroReply>) => {
+    const worker = new Worker(new URL('./kokoro.worker.ts', import.meta.url), { type: 'module' });
+    this.worker = worker;
+    worker.onmessage = ({ data }: MessageEvent<KokoroReply>) => {
+      if (this.worker !== worker || epoch !== this.epoch) return;
       const pending = this.requests.get(data.id);
       if (!pending) return;
       this.requests.delete(data.id);
       if (data.type === 'error') pending.reject(new Error(data.error));
       else pending.resolve(data);
     };
-    this.worker.onerror = (event) => {
+    worker.onerror = (event) => {
+      if (this.worker !== worker || epoch !== this.epoch) return;
       const error = new Error(event.message || 'The voice engine stopped. Reload the model to continue.');
       this.loaded = false;
+      this.loading = null;
+      worker.terminate();
+      this.worker = null;
       for (const request of this.requests.values()) request.reject(error);
       this.requests.clear();
     };

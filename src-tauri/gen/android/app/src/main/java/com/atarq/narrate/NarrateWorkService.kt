@@ -8,12 +8,23 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 
 /** Keeps user-requested work eligible while the screen is idle, until completion. */
 class NarrateWorkService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private val renewLock = object : Runnable {
+        override fun run() {
+            // Slow devices can render a book for longer than one lock timeout.
+            // Renewal belongs to the service, independent of WebView timers.
+            wakeLock?.acquire(6 * 60 * 60 * 1000L)
+            handler.postDelayed(this, 30 * 60 * 1000L)
+        }
+    }
     override fun onCreate() {
         super.onCreate()
         if (Build.VERSION.SDK_INT >= 26) {
@@ -38,11 +49,14 @@ class NarrateWorkService : Service() {
                     acquire(6 * 60 * 60 * 1000L)
                 }
         }
+        handler.removeCallbacks(renewLock)
+        handler.postDelayed(renewLock, 30 * 60 * 1000L)
         // Work is owned by the current WebView. Saved checkpoints recover if
         // Android destroys it; restarting an empty service would waste battery.
         return START_NOT_STICKY
     }
     override fun onDestroy() {
+        handler.removeCallbacks(renewLock)
         if (wakeLock?.isHeld == true) wakeLock?.release()
         wakeLock = null
         super.onDestroy()
