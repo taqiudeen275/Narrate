@@ -21,6 +21,7 @@ const { APP_VERSION } = await import('../src/version');
 const { useNarrate } = await import('../src/state/store');
 const { ModelsView } = await import('../src/views/ModelsView');
 const { GenerationView } = await import('../src/views/GenerationView');
+const { PlayerView } = await import('../src/views/PlayerView');
 const { window } = parseHTML('<html><body><div id="test"></div></body></html>');
 Object.assign(globalThis, { window, document: window.document, HTMLElement: window.HTMLElement,
   self: window, IS_REACT_ACT_ENVIRONMENT: true });
@@ -211,7 +212,7 @@ const restartedEngines: InstanceType<typeof WebKokoroEngine>[] = [];
 const assertRestart = async (modelId: string) => {
   // A fresh evaluation creates a new store, while the real persistence module
   // reads the same isolated IndexedDB records saved by the selection action.
-  const restarted = await import(`../src/state/store.ts?model-selection-restart=${modelId}`) as typeof import('../src/state/store');
+  const restarted = await import(`../src/state/store.ts?model-selection-restart=${modelId}-${useNarrate.getState().backendPreference}`) as typeof import('../src/state/store');
   assert.notEqual(restarted.useNarrate, useNarrate, 'restart uses a distinct store instance');
   assert.equal(restarted.useNarrate.getState().hydrated, false);
   assert.equal(restarted.useNarrate.getState().selectedModel, 'kokoro-q8', 'the new store starts at its default');
@@ -220,6 +221,7 @@ const assertRestart = async (modelId: string) => {
   assert.equal(state.selectedModel, modelId, 'startup restores the preference written by the real UI click');
   assert.ok(state.engine instanceof WebKokoroEngine);
   assert.equal(state.engine.id, modelId, 'startup constructs the matching real engine');
+  assert.equal(state.backendPreference, useNarrate.getState().backendPreference, 'startup retains the independently chosen CPU/automatic mode');
   assert.equal(state.engineReady, false, 'startup leaves inference unloaded until needed');
   assert.equal(state.doc, null, 'startup does not reopen an older document and change selection');
   restartedEngines.push(state.engine as InstanceType<typeof WebKokoroEngine>);
@@ -336,6 +338,30 @@ try {
   await run(() => useNarrate.getState().generate('full'));
   await assertJob('kokoro-fp32', 'Kokoro · Full precision', useNarrate.getState().activeDocId!);
   console.log('ok fresh unrelated import after selection: worker=fp32, saved job=kokoro-fp32, Work=Kokoro · Full precision');
+
+  const beforeCpuRecovery = generated.length;
+  const savedBeforeCpu = useNarrate.getState().audioProfile;
+  await render(createElement(ModelsView));
+  await click(control(window.document, 'CPU compatibility'));
+  await until(() => useNarrate.getState().backendPreference === 'wasm', 'CPU compatibility becomes selected');
+  assert.equal(useNarrate.getState().selectedModel, 'kokoro-fp32');
+  assert.deepEqual(useNarrate.getState().audioProfile, savedBeforeCpu, 'changing execution mode retains the existing saved playback');
+  assert.equal(useNarrate.getState().renderedCount, 1);
+  assert.equal(generated.length, beforeCpuRecovery, 'execution setting alone never starts synthesis');
+  await click(control(card('Kokoro · Full precision'), 'Load model'));
+  await until(() => useNarrate.getState().engineReady, 'the same full precision model reloads in CPU compatibility');
+  assert.equal(loads.at(-1)!.request.device, 'wasm', 'the actual settings click bypasses GPU selection');
+  assert.equal(loads.at(-1)!.dtype, 'fp32', 'CPU compatibility never switches to Balanced');
+  await assertRestart('kokoro-fp32');
+  await render(createElement(PlayerView));
+  await click(control(window.document, 'Regenerate audio'));
+  await until(() => useNarrate.getState().generationJobs[0]?.freshAudio === true && !useNarrate.getState().busy,
+    'the explicit recovery control finishes a fresh generation');
+  assert.equal(generated.length, beforeCpuRecovery + 1, 'the real regeneration button bypasses the saved complete narration');
+  assert.equal(useNarrate.getState().generationJobs[0].mode, 'full', 'audio recovery prepares a take before deliberate playback');
+  assert.equal(useNarrate.getState().player.isRunning, false);
+  await assertJob('kokoro-fp32', 'Kokoro · Full precision', useNarrate.getState().activeDocId!);
+  console.log('ok CPU compatibility click → full precision reload → Regenerate audio: chosen dtype kept, existing cache bypassed, restart preference retained');
 
   await selectAndLoad('kokoro-q4', 'Kokoro · 4-bit edition', 'q4');
   const fourBitEngine = useNarrate.getState().engine;

@@ -65,6 +65,11 @@
 .n-model-performance { margin-block: var(--s-4) var(--s-5); max-inline-size: 66ch; color: var(--ink-2); font-size: var(--t-xs); line-height: 1.7; }
 .n-model-performance summary { cursor: pointer; color: var(--accent); font-weight: 500; padding-block: var(--s-2); }
 .n-model-performance p { margin: var(--s-2) 0; }
+.n-model-runtime { margin-block: var(--s-4); max-inline-size: 66ch; }
+.n-model-runtime h3 { margin: 0 0 var(--s-3); font-size: var(--t-lg); font-weight: 500; }
+.n-model-runtime > p { margin: var(--s-3) 0 0; color: var(--ink-2); font-size: var(--t-xs); line-height: 1.7; }
+.n-model-runtime .n-segment { max-inline-size: 100%; flex-wrap: wrap; }
+.n-model-runtime .n-segbtn { min-block-size: 44px; white-space: normal; }
 .n-model-catalog-head { margin-block-end: var(--s-4); }
 .n-model-catalog-head h3 { margin: 0; font-size: var(--t-lg); font-weight: 500; }
 .n-model-catalog-head p { margin: var(--s-1) 0 0; font-size: var(--t-xs); line-height: 1.65; color: var(--ink-2); }

@@ -1141,6 +1141,10 @@
 .n-player-generation-foot { display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); margin-block-start: var(--s-2); }
 .n-player-generation-foot .pill { flex: 0 0 auto; }
 .n-player-generation .pill { font-size: var(--t-xs); padding: 0.45rem 0.8rem; }
+.n-audio-recovery { inline-size: min(100%, 32rem); justify-self: center; font-size: var(--t-xs); line-height: 1.7; }
+.n-audio-recovery summary { cursor: pointer; color: var(--accent); padding-block: var(--s-2); }
+.n-audio-recovery p { color: var(--ink-2); margin: var(--s-2) 0 var(--s-3); }
+.n-audio-recovery .pill { min-block-size: 44px; }
 .n-startup { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s-3); color: var(--ink-2); font-size: var(--t-sm); }
 .n-loading-bars { display: flex; align-items: center; justify-content: center; gap: 4px; block-size: 2.5rem; }
 .n-loading-bars i { display: block; inline-size: 3px; block-size: 1.65rem; border-radius: var(--r-pill); background: var(--accent); transform-origin: center; animation: n-loading-wave 1s var(--ease) infinite; }

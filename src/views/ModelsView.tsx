@@ -7,9 +7,11 @@ import { deviceHints, deviceMeasurements, loadDeviceMeasurements, modelDownloadW
 
 const sizes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 export function ModelsView() {
-  const { selectedModel, selectModel, engineReady, engineLoading, busy, ensureEngine, engine } = useNarrate(useShallow((state) => ({
+  const { selectedModel, selectModel, engineReady, engineLoading, busy, ensureEngine, engine,
+    backendPreference, setBackendPreference } = useNarrate(useShallow((state) => ({
     selectedModel: state.selectedModel, selectModel: state.selectModel, engineReady: state.engineReady,
     engineLoading: state.engineLoading, busy: state.busy, ensureEngine: state.ensureEngine, engine: state.engine,
+    backendPreference: state.backendPreference, setBackendPreference: state.setBackendPreference,
   })));
   const runtime = engineReady ? engine.runtime : null;
   const [, refresh] = useReducer((value) => value + 1, 0);
@@ -39,6 +41,18 @@ export function ModelsView() {
       <p className="n-device-recommended">{recommended.name}</p><p>{recommendation.reason}</p>
       <div className="n-device-facts">{hints.memoryGB !== null ? <span>About {hints.memoryGB} GB reported memory</span> : null}{hints.cores ? <span>{hints.cores} reported CPU threads</span> : null}<span>{recommendation.measured ? 'Measured on this device' : 'Starting recommendation'}</span></div>
       {recommendation.realtimeFactor !== null ? <p className="n-device-speed">Once the model is loaded, 10 minutes of audio takes about {Math.max(1, Math.round(10 * recommendation.realtimeFactor))} minutes to generate at normal pace. {recommendation.mode === 'full' ? 'Render all first for uninterrupted listening.' : 'Streaming should keep up at normal pace.'} Temperature and other apps can change speed.</p> : <p className="n-device-speed">Generate a few sentences at 1× pace to measure this device. Memory and CPU reports are approximate; temperature and other apps can change speed.</p>}
+    </section>
+    <section className="n-model-runtime" aria-label="Generation execution">
+      <h3>Generation</h3>
+      <div className="n-segment" role="group" aria-label="Generation execution mode">
+        <button type="button" className={`n-segbtn${backendPreference === 'auto' ? ' n-segbtn-on' : ''}`}
+          aria-pressed={backendPreference === 'auto'} disabled={busy || engineLoading}
+          onClick={() => void setBackendPreference('auto')}>Automatic</button>
+        <button type="button" className={`n-segbtn${backendPreference === 'wasm' ? ' n-segbtn-on' : ''}`}
+          aria-pressed={backendPreference === 'wasm'} disabled={busy || engineLoading}
+          onClick={() => void setBackendPreference('wasm')}>CPU compatibility</button>
+      </div>
+      <p>Automatic uses GPU for Full precision when available. If audio is distorted, try CPU compatibility, then open the document and choose Audio recovery → Regenerate audio. This keeps your chosen edition; CPU generation may take longer.</p>
     </section>
     <details className="n-model-performance">
       <summary>Generation performance</summary>

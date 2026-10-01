@@ -69,6 +69,12 @@ export function PlayerView({ onPickVoice }: { onPickVoice?: () => void }) {
         <button type="button" className="pill" onClick={() => setView('reader')}><Icon name="page" size={17} />Follow the text</button>
         {complete ? <><button type="button" className="pill" disabled={working} onClick={() => void exportAudio('wav')}><Icon name="download" size={15} />WAV</button><button type="button" className="pill" disabled={working} onClick={() => void exportAudio('mp3')}><Icon name="download" size={15} />MP3</button></> : <button type="button" className="pill" onClick={() => setView('library')}><Icon name="library" size={16} />Library</button>}
       </div>
+      {renderedCount > 0 ? <details className="n-audio-recovery">
+        <summary>Audio recovery</summary>
+        <p>Make a fresh narration with {engine.name} and the current narrator. This replaces saved audio for this selection. Your previous take stays saved until replacement starts successfully.</p>
+        <button type="button" className="pill" disabled={working}
+          onClick={() => void generate('full', { fresh: true })}>Regenerate audio</button>
+      </details> : null}
     </div>
   );
 }
